@@ -379,6 +379,7 @@ out:
 	return 0;
 }
 
+//查询获取所有IB设备，存放在cma_dev_array全局数组中；检测是否支持AF_IB协议
 int ucma_init(void)
 {
 	int ret;

@@ -79,7 +79,6 @@ static inline void *idx_at(struct indexer *idx, int index)
  * must be provided by the caller.  Caller must initialize the
  * index map by setting it to 0.
  */
-
 struct index_map
 {
 	void **array[IDX_ARRAY_SIZE];
