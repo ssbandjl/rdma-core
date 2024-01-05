@@ -1416,6 +1416,7 @@ err_db:
 err_free:
 	free(srq->wrid);
 	mlx5_free_actual_buf(ctx, &srq->buf);
+	free(srq->free_wqe_bitmap);
 
 err:
 	free(srq);
@@ -1467,6 +1468,7 @@ int mlx5_destroy_srq(struct ibv_srq *srq)
 	free(msrq->tm_list);
 	free(msrq->wrid);
 	free(msrq->op);
+	free(msrq->free_wqe_bitmap);
 	free(msrq);
 
 	return 0;
@@ -3707,6 +3709,7 @@ err_free_db:
 err_free:
 	free(msrq->wrid);
 	mlx5_free_actual_buf(ctx, &msrq->buf);
+	free(msrq->free_wqe_bitmap);
 
 err:
 	free(msrq);
@@ -4088,6 +4091,7 @@ void mlx5_query_device_ctx(struct mlx5_context *mctx)
 		resp.dci_streams_caps.max_log_num_concurent;
 	mctx->dci_streams_caps.max_log_num_errored =
 		resp.dci_streams_caps.max_log_num_errored;
+	mctx->reg_c0 = resp.reg_c0;
 
 	if (resp.flags & MLX5_IB_QUERY_DEV_RESP_FLAGS_CQE_128B_COMP)
 		mctx->vendor_cap_flags |= MLX5_VENDOR_CAP_FLAGS_CQE_128B_COMP;
@@ -5006,6 +5010,7 @@ _mlx5dv_alloc_dm(struct ibv_context *context,
 	int err;
 
 	if ((mlx5_dm_attr->type != MLX5DV_DM_TYPE_MEMIC) &&
+	    (mlx5_dm_attr->type != MLX5DV_DM_TYPE_ENCAP_SW_ICM) &&
 	    (mlx5_dm_attr->type != MLX5DV_DM_TYPE_STEERING_SW_ICM) &&
 	    (mlx5_dm_attr->type != MLX5DV_DM_TYPE_HEADER_MODIFY_SW_ICM) &&
 	    (mlx5_dm_attr->type != MLX5DV_DM_TYPE_HEADER_MODIFY_PATTERN_SW_ICM)) {

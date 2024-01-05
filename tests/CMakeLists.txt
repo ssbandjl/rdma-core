@@ -8,6 +8,7 @@ rdma_python_test(tests
   base_rdmacm.py
   cuda_utils.py
   efa_base.py
+  irdma_base.py
   mlx5_base.py
   mlx5_prm_structs.py
   rdmacm_utils.py
@@ -54,6 +55,7 @@ rdma_python_test(tests
   test_relaxed_ordering.py
   test_rss_traffic.py
   test_shared_pd.py
+  test_srq.py
   test_tag_matching.py
   utils.py
   )

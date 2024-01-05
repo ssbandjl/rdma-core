@@ -951,12 +951,20 @@ int dr_send_postsend_action(struct mlx5dv_dr_domain *dmn,
 
 	num_qps = dmn->info.use_mqs ? DR_MAX_SEND_RINGS : 1;
 
-	send_info.write.addr	= (uintptr_t)action->rewrite.param.data;
-	send_info.write.length	= action->rewrite.param.num_of_actions *
-				  DR_MODIFY_ACTION_SIZE;
-	send_info.write.lkey	= 0;
-	send_info.remote_addr	= dr_icm_pool_get_chunk_mr_addr(action->rewrite.param.chunk);
-	send_info.rkey		= dr_icm_pool_get_chunk_rkey(action->rewrite.param.chunk);
+	if (action->action_type == DR_ACTION_TYP_L2_TO_TNL_L2 ||
+	    action->action_type == DR_ACTION_TYP_L2_TO_TNL_L3) {
+		send_info.write.addr = (uintptr_t)action->reformat.data;
+		send_info.write.length = action->reformat.reformat_size;
+		send_info.remote_addr = dr_icm_pool_get_chunk_mr_addr(action->reformat.chunk);
+		send_info.rkey = dr_icm_pool_get_chunk_rkey(action->reformat.chunk);
+	} else {
+		send_info.write.addr = (uintptr_t)action->rewrite.param.data;
+		send_info.write.length = action->rewrite.param.num_of_actions *
+					  DR_MODIFY_ACTION_SIZE;
+		send_info.remote_addr = dr_icm_pool_get_chunk_mr_addr(action->rewrite.param.chunk);
+		send_info.rkey = dr_icm_pool_get_chunk_rkey(action->rewrite.param.chunk);
+	}
+	send_info.write.lkey = 0;
 
 	/* To avoid race between action creation and its use in other QP
 	 * write it in all QP's.
@@ -1001,15 +1009,14 @@ int dr_send_postsend_pattern(struct mlx5dv_dr_domain *dmn,
 }
 
 int dr_send_postsend_args(struct mlx5dv_dr_domain *dmn, uint64_t arg_id,
-			  uint16_t num_of_actions, uint8_t *actions_data)
+			  uint16_t num_of_actions, uint8_t *actions_data,
+			  uint32_t ring_index)
 {
 	struct postsend_info send_info = {};
 	int data_len, iter = 0, cur_sent;
 	uint64_t addr;
-	int num_qps;
-	int i, ret;
+	int ret;
 
-	num_qps = dmn->info.use_mqs ? DR_MAX_SEND_RINGS : 1;
 	addr = (uintptr_t)actions_data;
 	data_len = num_of_actions * DR_MODIFY_ACTION_SIZE;
 
@@ -1021,15 +1028,10 @@ int dr_send_postsend_args(struct mlx5dv_dr_domain *dmn, uint64_t arg_id,
 		send_info.write.lkey    = 0;
 		send_info.remote_addr   = arg_id + iter;
 
-		/* To avoid race between action creation and its use in other QP
-		 * write it in all QP's.
-		 */
-		for (i = 0; i < num_qps; i++) {
-			ret = dr_postsend_icm_data(dmn, &send_info, i);
-			if (ret) {
-				errno = ret;
-				goto out;
-			}
+		ret = dr_postsend_icm_data(dmn, &send_info, ring_index);
+		if (ret) {
+			errno = ret;
+			goto out;
 		}
 
 		iter++;

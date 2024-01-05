@@ -28,7 +28,7 @@
 
 %define         git_ver %{nil}
 Name:           rdma-core
-Version:        47.0
+Version:        50.0
 Release:        0
 Summary:        RDMA core userspace libraries and daemons
 License:        BSD-2-Clause OR GPL-2.0-only
@@ -478,7 +478,9 @@ mkdir -p %{buildroot}%{_unitdir}
 # Port type setup for mlx4 dual port cards
 install -D -m0644 redhat/rdma.mlx4.sys.modprobe %{buildroot}%{_modprobedir}/50-libmlx4.conf
 install -D -m0644 redhat/rdma.mlx4.conf %{buildroot}/%{_sysconfdir}/rdma/mlx4.conf
+%if 0%{?dma_coherent}
 chmod 0644 %{buildroot}%{_modprobedir}/mlx4.conf
+%endif
 install -D -m0755 redhat/rdma.mlx4-setup.sh %{buildroot}%{_libexecdir}/mlx4-setup.sh
 
 # Dracut file for IB support during boot
@@ -611,7 +613,6 @@ done
 %service_del_postun rdma-ndd.service
 
 %files
-%defattr(-,root,root)
 %dir %{_sysconfdir}/rdma
 %dir %{_sysconfdir}/rdma/modules
 %dir %{_docdir}/%{name}-%{version}
@@ -649,7 +650,6 @@ done
 %{_sbindir}/rcrdma
 
 %files devel
-%defattr(-,root,root)
 %doc %{_docdir}/%{name}-%{version}/MAINTAINERS
 %dir %{_includedir}/infiniband
 %dir %{_includedir}/rdma
@@ -678,7 +678,6 @@ done
 %endif
 
 %files -n libibverbs
-%defattr(-,root,root)
 %dir %{_sysconfdir}/libibverbs.d
 %dir %{_libdir}/libibverbs
 %{_libdir}/libibverbs/*.so
@@ -689,42 +688,33 @@ done
 %{_mandir}/man7/rxe*
 
 %files -n libibnetdisc%{ibnetdisc_major}
-%defattr(-, root, root)
 %{_libdir}/libibnetdisc.so.*
 
 %files -n libibmad%{mad_major}
-%defattr(-, root, root)
 %{_libdir}/libibmad.so.*
 
 %files -n %verbs_lname
-%defattr(-,root,root)
 %{_libdir}/libibverbs*.so.*
 
 %if 0%{?dma_coherent}
 %files -n %efa_lname
-%defattr(-,root,root)
 %{_libdir}/libefa*.so.*
 
 %files -n %mana_lname
-%defattr(-,root,root)
 %{_libdir}/libmana*.so.*
 
 %files -n %mlx4_lname
-%defattr(-,root,root)
 %{_libdir}/libmlx4*.so.*
 
 %files -n %mlx5_lname
-%defattr(-,root,root)
 %{_libdir}/libmlx5*.so.*
 %endif
 
 %files -n libibverbs-utils
-%defattr(-,root,root)
 %{_bindir}/ibv_*
 %{_mandir}/man1/ibv_*
 
 %files -n ibacm
-%defattr(-,root,root)
 %config(noreplace) %{_sysconfdir}/rdma/ibacm_opts.cfg
 %{_bindir}/ib_acme
 %{_sbindir}/ibacm
@@ -740,7 +730,6 @@ done
 %doc %{_docdir}/%{name}-%{version}/ibacm.md
 
 %files -n infiniband-diags
-%defattr(-, root, root)
 %dir %{_sysconfdir}/infiniband-diags
 %config(noreplace) %{_sysconfdir}/infiniband-diags/*
 %{_sbindir}/ibaddr
@@ -807,7 +796,6 @@ done
 %{perl_vendorlib}/IBswcountlimits.pm
 
 %files -n iwpmd
-%defattr(-,root,root)
 %dir %{_sysconfdir}/rdma
 %dir %{_sysconfdir}/rdma/modules
 %{_sbindir}/iwpmd
@@ -820,22 +808,18 @@ done
 %{_mandir}/man5/iwpmd.*
 
 %files -n %umad_lname
-%defattr(-,root,root)
 %{_libdir}/libibumad*.so.*
 
 %files -n %rdmacm_lname
-%defattr(-,root,root)
 %{_libdir}/librdmacm*.so.*
 %doc %{_docdir}/%{name}-%{version}/librdmacm.md
 
 %files -n rsocket
-%defattr(-,root,root)
 %dir %{_libdir}/rsocket
 %{_libdir}/rsocket/*.so*
 %{_mandir}/man7/rsocket.*
 
 %files -n librdmacm-utils
-%defattr(-,root,root)
 %{_bindir}/cmtime
 %{_bindir}/mckey
 %{_bindir}/rcopy
@@ -864,7 +848,6 @@ done
 %{_mandir}/man1/udpong.*
 
 %files -n srp_daemon
-%defattr(-,root,root)
 %dir %{_libexecdir}/srp_daemon
 %dir %{_sysconfdir}/rdma
 %dir %{_sysconfdir}/rdma/modules
@@ -885,7 +868,6 @@ done
 %doc %{_docdir}/%{name}-%{version}/ibsrpdm.md
 
 %files -n rdma-ndd
-%defattr(-, root, root)
 %{_sbindir}/rdma-ndd
 %{_sbindir}/rcrdma-ndd
 %{_unitdir}/rdma-ndd.service

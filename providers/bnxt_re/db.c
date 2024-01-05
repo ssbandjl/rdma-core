@@ -37,8 +37,62 @@
  */
 
 #include <util/mmio.h>
+#include <ccan/minmax.h>
 #include <stdlib.h>
 #include "main.h"
+
+static uint16_t rnd(struct xorshift32_state *state, uint16_t range)
+{
+	/* range must be a power of 2 - 1 */
+	return (xorshift32(state) & range);
+}
+
+static int calculate_fifo_occupancy(struct bnxt_re_context *cntx)
+{
+	struct bnxt_re_pacing_data *pacing_data =
+		(struct bnxt_re_pacing_data *)cntx->dbr_page;
+	struct bnxt_re_dev *rdev = cntx->rdev;
+	uint32_t read_val, fifo_occup;
+	uint64_t fifo_reg_off;
+	uint64_t *dbr_map;
+
+	fifo_reg_off =  pacing_data->grc_reg_offset & ~(BNXT_RE_PAGE_MASK(rdev->pg_size));
+	dbr_map = cntx->bar_map + fifo_reg_off;
+
+	read_val = *dbr_map;
+	fifo_occup = pacing_data->fifo_max_depth -
+		((read_val & pacing_data->fifo_room_mask) >>
+		 pacing_data->fifo_room_shift);
+
+	return fifo_occup;
+}
+
+static void bnxt_re_do_pacing(struct bnxt_re_context *cntx, struct xorshift32_state *state)
+{
+	struct bnxt_re_pacing_data *pacing_data =
+		(struct bnxt_re_pacing_data *)cntx->dbr_page;
+	uint32_t fifo_occup;
+	int wait_time = 1;
+
+	if (!pacing_data)
+		return;
+
+	if (rnd(state, BNXT_RE_MAX_DO_PACING) < pacing_data->do_pacing) {
+		while ((fifo_occup = calculate_fifo_occupancy(cntx))
+				>  pacing_data->pacing_th) {
+			uint32_t usec_wait;
+
+			if (pacing_data->alarm_th && fifo_occup > pacing_data->alarm_th)
+				bnxt_re_notify_drv(&cntx->ibvctx.context);
+
+			usec_wait = rnd(state, wait_time - 1);
+			if (usec_wait)
+				bnxt_re_sub_sec_busy_wait(usec_wait * 1000);
+			/* wait time capped at 128 us */
+			wait_time = min(wait_time * 2, 128);
+		}
+	}
+}
 
 static void bnxt_re_ring_db(struct bnxt_re_dpi *dpi,
 			    struct bnxt_re_db_hdr *hdr)
@@ -52,40 +106,52 @@ static void bnxt_re_ring_db(struct bnxt_re_dpi *dpi,
 }
 
 static void bnxt_re_init_db_hdr(struct bnxt_re_db_hdr *hdr, uint32_t indx,
-				uint32_t qid, uint32_t typ)
+				uint32_t qid, uint32_t toggle, uint32_t typ)
 {
-	hdr->indx = htole32(indx & BNXT_RE_DB_INDX_MASK);
+	hdr->indx = htole32(indx | toggle << BNXT_RE_DB_TOGGLE_SHIFT);
 	hdr->typ_qid = htole32(qid & BNXT_RE_DB_QID_MASK);
 	hdr->typ_qid |= htole32(((typ & BNXT_RE_DB_TYP_MASK) <<
-				  BNXT_RE_DB_TYP_SHIFT));
+				 BNXT_RE_DB_TYP_SHIFT) | (0x1UL << BNXT_RE_DB_VALID_SHIFT));
 }
 
 void bnxt_re_ring_rq_db(struct bnxt_re_qp *qp)
 {
 	struct bnxt_re_db_hdr hdr;
+	uint32_t epoch;
 	uint32_t tail;
 
+	bnxt_re_do_pacing(qp->cntx, &qp->rand);
 	tail = *qp->jrqq->hwque->dbtail;
-	bnxt_re_init_db_hdr(&hdr, tail, qp->qpid, BNXT_RE_QUE_TYPE_RQ);
+	epoch = (qp->jrqq->hwque->flags &  BNXT_RE_FLAG_EPOCH_TAIL_MASK) <<
+		BNXT_RE_DB_EPOCH_TAIL_SHIFT;
+	bnxt_re_init_db_hdr(&hdr, tail | epoch,
+			    qp->qpid, 0, BNXT_RE_QUE_TYPE_RQ);
 	bnxt_re_ring_db(qp->udpi, &hdr);
 }
 
 void bnxt_re_ring_sq_db(struct bnxt_re_qp *qp)
 {
 	struct bnxt_re_db_hdr hdr;
+	uint32_t epoch;
 	uint32_t tail;
 
+	bnxt_re_do_pacing(qp->cntx, &qp->rand);
 	tail = *qp->jsqq->hwque->dbtail;
-	bnxt_re_init_db_hdr(&hdr, tail, qp->qpid, BNXT_RE_QUE_TYPE_SQ);
+	epoch = (qp->jsqq->hwque->flags & BNXT_RE_FLAG_EPOCH_TAIL_MASK) <<
+		BNXT_RE_DB_EPOCH_TAIL_SHIFT;
+	bnxt_re_init_db_hdr(&hdr, tail | epoch, qp->qpid, 0, BNXT_RE_QUE_TYPE_SQ);
 	bnxt_re_ring_db(qp->udpi, &hdr);
 }
 
 void bnxt_re_ring_srq_db(struct bnxt_re_srq *srq)
 {
 	struct bnxt_re_db_hdr hdr;
+	uint32_t epoch;
 
-	bnxt_re_init_db_hdr(&hdr, srq->srqq->tail, srq->srqid,
-			    BNXT_RE_QUE_TYPE_SRQ);
+	bnxt_re_do_pacing(srq->cntx, &srq->rand);
+	epoch = (srq->srqq->flags & BNXT_RE_FLAG_EPOCH_TAIL_MASK) <<
+		BNXT_RE_DB_EPOCH_TAIL_SHIFT;
+	bnxt_re_init_db_hdr(&hdr, srq->srqq->tail | epoch, srq->srqid, 0, BNXT_RE_QUE_TYPE_SRQ);
 	bnxt_re_ring_db(srq->udpi, &hdr);
 }
 
@@ -93,7 +159,8 @@ void bnxt_re_ring_srq_arm(struct bnxt_re_srq *srq)
 {
 	struct bnxt_re_db_hdr hdr;
 
-	bnxt_re_init_db_hdr(&hdr, srq->cap.srq_limit, srq->srqid,
+	bnxt_re_do_pacing(srq->cntx, &srq->rand);
+	bnxt_re_init_db_hdr(&hdr, srq->cap.srq_limit, srq->srqid, 0,
 			    BNXT_RE_QUE_TYPE_SRQ_ARM);
 	bnxt_re_ring_db(srq->udpi, &hdr);
 }
@@ -101,16 +168,27 @@ void bnxt_re_ring_srq_arm(struct bnxt_re_srq *srq)
 void bnxt_re_ring_cq_db(struct bnxt_re_cq *cq)
 {
 	struct bnxt_re_db_hdr hdr;
+	uint32_t epoch;
 
-	bnxt_re_init_db_hdr(&hdr, cq->cqq.head, cq->cqid, BNXT_RE_QUE_TYPE_CQ);
+	bnxt_re_do_pacing(cq->cntx, &cq->rand);
+	epoch = (cq->cqq.flags & BNXT_RE_FLAG_EPOCH_HEAD_MASK) << BNXT_RE_DB_EPOCH_HEAD_SHIFT;
+	bnxt_re_init_db_hdr(&hdr, cq->cqq.head | epoch, cq->cqid, 0, BNXT_RE_QUE_TYPE_CQ);
 	bnxt_re_ring_db(cq->udpi, &hdr);
 }
 
 void bnxt_re_ring_cq_arm_db(struct bnxt_re_cq *cq, uint8_t aflag)
 {
+	uint32_t epoch, toggle = 0;
 	struct bnxt_re_db_hdr hdr;
+	uint32_t *pgptr;
 
-	bnxt_re_init_db_hdr(&hdr, cq->cqq.head, cq->cqid, aflag);
+	pgptr = (uint32_t *)cq->toggle_map;
+	if (pgptr)
+		toggle = *pgptr;
+
+	bnxt_re_do_pacing(cq->cntx, &cq->rand);
+	epoch = (cq->cqq.flags & BNXT_RE_FLAG_EPOCH_HEAD_MASK) <<  BNXT_RE_DB_EPOCH_HEAD_SHIFT;
+	bnxt_re_init_db_hdr(&hdr, cq->cqq.head | epoch, cq->cqid, toggle, aflag);
 	bnxt_re_ring_db(cq->udpi, &hdr);
 }
 
@@ -119,6 +197,7 @@ void bnxt_re_ring_pstart_db(struct bnxt_re_qp *qp,
 {
 	uint64_t key;
 
+	bnxt_re_do_pacing(qp->cntx, &qp->rand);
 	key = ((((pbuf->wcdpi & BNXT_RE_DB_PIHI_MASK) <<
 		  BNXT_RE_DB_PIHI_SHIFT) | (pbuf->qpid & BNXT_RE_DB_QID_MASK)) |
 	       ((BNXT_RE_PUSH_TYPE_START & BNXT_RE_DB_TYP_MASK) <<
@@ -136,6 +215,7 @@ void bnxt_re_ring_pend_db(struct bnxt_re_qp *qp,
 {
 	uint64_t key;
 
+	bnxt_re_do_pacing(qp->cntx, &qp->rand);
 	key = ((((pbuf->wcdpi & BNXT_RE_DB_PIHI_MASK) <<
 		  BNXT_RE_DB_PIHI_SHIFT) | (pbuf->qpid & BNXT_RE_DB_QID_MASK)) |
 	       ((BNXT_RE_PUSH_TYPE_END & BNXT_RE_DB_TYP_MASK) <<
