@@ -25,3 +25,27 @@ const char *ibv_event_type_str(enum ibv_event_type event)
     return event_type_str[event]        
 
 
+.create_qp_ex = mlx5_create_qp_ex,
+    static struct ibv_qp *create_q
+        ibv_cmd_create_qp_ex -> Move QP create and destroy commands to ioctl
+
+
+
+
+reg mem:
+struct ibv_mr *ibv_reg_mr
+__ibv_reg_mr
+ibv_reg_mr_iova2 -> 添加一个标志以允许创建宽松排序内存区域。 通过此类 MR 的访问可以通过允许系统对某些访问重新排序来提高性能。 由于宽松排序是一种优化，因此不支持它的驱动程序可以简单地忽略它。 可选的 MR 访问位范围是根据内核匹配部分定义的，其第一个条目将为 IBV_ACCESS_RELAXED_ORDERING。 如果应用程序使用可选范围中的一位，则库会将其屏蔽掉，以防内核不支持“MR 可选模式”。
+    reg_mr -> mlx5_vfio_reg_mr
+    .reg_mr	       = mlx5_reg_mr,
+        ...
+        execute_cmd_write(pd->context, IB_USER_VERBS_CMD_REG_MR, cmd, -> ib_uverbs_reg_mr
+
+
+
+split and join cmd:
+IB_USER_VERBS_CMD_
+
+
+
+

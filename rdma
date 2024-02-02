@@ -1,0 +1,132 @@
+server: 服务端创建事件通道,创建通信标识ID, 启动RDMA监听
+rdma_create_event_channel <- vrb_eq_open <- fi_eq_open
+rdma_create_id <- vrb_create_ep <- vrb_open_ep <- fi_endpoint, librdmacm/cma.c -> rdma_create_event_channel HG创建端点 na_ofi_basic_ep_open
+rdma_listen -> fi_listen -> .listen = vrb_pep_listen -> vrb_pep_listen -> rdma_listen, na_ofi_basic_ep_open -> fi_enable -> rxm_ep_ctrl -> rxm_start_listen -> fi_listen
+
+if (ofi_epoll_add(_eq->epollfd, _eq->channel->fd, OFI_EPOLL_IN, NULL)) -> 将rdma事件通道的fd关联到eq的epollfd
+
+client:客户端创建事件通道,创建通信标识ID, 解析服务端地址, 发送数据时, 获取连接, 解析路由
+rdma_create_event_channel
+rdma_create_id
+rdma_resolve_addr -> RDMA_CM_EVENT_ADDRESS_RESOLVED ->  rxm_open_conn -> fi_endpoint (vrb_open_ep) -> rdma_resolve_addr HG -> HG_Trigger -> hg_op_id->callback(&hg_cb_info) 查询地址设置的回调 lookup_callback ->  HG_Forward -> NA_Msg_send_unexpected -> fi_senddata -> rxm_get_conn -> fi_endpoint -> vrb_open_ep -> vrb_create_ep -> rdma_resolve_addr
+rdma_resolve_route -> RDMA_CM_EVENT_ROUTE_RESOLVED -> rxm_send_connect -> fi_connect -> rdma_resolve_route 也是HG发送的时候建立连接
+------------------ 
+分配RDMA结构(服务端和客户端对等, 均要执行), 查询网卡, 分配保护域, 创建完成通道,完成队列, 通知完成队列准备好接收完成事件, 创建队列对, 注册内存
+ibv_query_device <- fi_getinfo -> vrb_getinfo -> ibv_query_device
+ibv_alloc_pd <- fi_domain -> rxm_domain_open -> ibv_alloc_pd
+ibv_create_comp_channel -> na_ofi_eq_open -> fi_cq_open -> vrb_cq_open -> ibv_create_comp_channel
+ibv_create_cq -> na_ofi_eq_open -> fi_cq_open -> vrb_cq_open -> ibv_create_cq
+ibv_req_notify_cq -> na_ofi_poll_try_wait -> fi_trywait -> vrb_trywait -> vrb_cq_trywait
+rdma_create_qp -> na_ofi_context_create -> fi_enable -> rdma_create_qp
+ibv_reg_mr -> NA_Mem_register -> na_ofi_mem_register -> fi_mr_regv -> ibv_reg_mr
+------------------
+轮训完成队列
+ibv_poll_cq -> na_ofi_msg_send_unexpected -> fi_senddata -> fi_send -> vrb_flush_cq -> ibv_poll_cq
+
+接收端提前往接收队列放置工作请求WR
+ibv_post_recv -> rxm_open_conn -> ibv_post_recv | na_ofi_tag_recv, na_ofi_msg_multi_recv -> fi_trecv -> ibv_post_recv
+
+客户端与服务端建立连接
+rdma_connect -> server -> RDMA_CM_EVENT_CONNECT_REQUEST, -> fi_senddata -> rxm_get_conn -> rdma_connect
+
+server:
+case RDMA_CM_EVENT_CONNECT_REQUEST
+------------------ 
+分配RDMA结构
+ibv_query_device
+ibv_alloc_pd
+ibv_create_comp_channel
+ibv_create_cq
+ibv_req_notify_cq
+rdma_create_qp
+ibv_reg_mr
+------------------
+ibv_post_recv
+rdma_accept
+RDMA_CM_EVENT_ESTABLISHED
+ibv_post_send
+
+clinet: 客户端发送非预期消息
+RDMA_CM_EVENT_ESTABLISHED
+ibv_post_send -> na_ofi_msg_send_unexpected -> ibv_post_send
+
+销毁资源
+server:
+rdma_disconnect
+
+ibv_dereg_mr
+ibv_destroy_cq
+ibv_destroy_comp_channel
+rdma_destroy_qp
+
+rdma_destroy_id
+rdma_destroy_event_channel
+
+client:
+rdma_disconnect
+
+ibv_dereg_mr
+ibv_destroy_cq
+ibv_destroy_comp_channel
+rdma_destroy_qp
+
+rdma_destroy_id
+rdma_destroy_event_channel
+
+
+
+以下是部分接口详解:
+创建事件通道:
+rdma_create_event_channel - 打开用于报告通信事件的通道。 描述：异步事件通过事件通道上报给用户。 每个事件通道映射到一个文件描述符。 注意：所有创建的事件通道必须通过调用 rdma_destroy_event_channel 销毁。 用户应调用 rdma_get_cm_event 来检索事件通道上的事件。 另请参见：rdma_get_cm_event、rdma_destroy_event_channel, 流程: 查询获取所有IB设备，存放在cma_dev_array全局数组中；检测是否支持AF_IB协议, 打开CM的fd, 返回事件
+struct rdma_event_channel *rdma_create_event_channel(void)
+  ucma_init()
+  channel->fd = open_cdev(dev_name, dev_cdev) -> 打开fd /dev/infiniband/rdma_cm
+  返回通道
+
+
+
+分配通信标识
+int rdma_create_id(struct rdma_event_channel *channel, struct rdma_cm_id **id, void *context, enum rdma_port_space ps)
+cmd = UCMA_CMD_CREATE_ID
+ret = write(id_priv->id.channel->fd, &cmd, sizeof cmd) -> 通知内核
+ucma_insert_id(id_priv)
+  idm_set -> librdmacm：定义通过 RDMA 接口 (rsockets) 的流式传输，引入了一组新的 API，支持 RDMA 设备上的字节流接口。 新接口与套接字匹配，只是所有函数调用都以“r”为前缀。 定义了以下函数： rsocket rbind、rlisten、raccept、rconnect rshutdown、rclose rrecv、rrecvfrom、rrecvmsg、rread、rreadv rsend、rsendto、rsendmsg、rwrite、rwritev rpoll、rselect rgetpeername、rgetsockname rsetsockopt、rgetsockopt、rfcntl 函数采用相同的方法 参数与用于套接字的参数相同。 目前支持以下功能和标志： PF_INET、PF_INET6、SOCK_STREAM、IPPROTO_TCP MSG_DONTWAIT、MSG_PEEK SO_REUSEADDR、TCP_NODELAY、SO_ERROR、SO_SNDBUF、SO_RCVBUF O_NONBLOCK rpoll 调用支持轮询 rsockets 和普通 fd, 
+  index_map(二级指针): 索引映射 - 将结构与索引关联起来。 同步必须由调用者提供。 调用者必须通过将索引映射设置为 0 来初始化它
+  提供一组索引操作接口, 设置,插入(idx_insert),增长(idx_grow),替换,移除,清理等
+  rsocket是附在rdma_cm库中的一个子模块，提供了完全类似于socket接口的rdma调用
+  对于rdma编程，目前主流实现是利用rdma_cm来建立连接，然后利用verbs来传输数据。  rdma_cm和ibverbs分别会创建一个fd，这两个fd的分工不同。rdma_cm fd主要用于通知建连相关的事件，verbs fd则主要通知有新的cqe发生。当直接对rdma_cm fd进行poll/epoll监听时，此时只能监听到POLLIN事件，这意味着有rdma_cm事件发生。当直接对verbs fd进行poll/epoll监听时，同样只能监听到POLLIN事件，这意味着有新的cqe  作者：异客z 链接：https://www.jianshu.com/p/4d71f1c8e77c
+
+
+
+监听客户端的连接请求, 给内核发送监听命令, 查询地址/路由
+int rdma_listen(struct rdma_cm_id *id, int backlog)
+cmd = UCMA_CMD_LISTEN
+write(id->channel->fd, &cmd, sizeof cmd)
+
+
+
+解析地址
+int rdma_resolve_addr(struct rdma_cm_id *id, struct sockaddr *src_addr, struct sockaddr *dst_addr, int timeout_ms)
+
+
+
+ibv_query_device
+  mlx5_query_device_ex
+  IB_USER_VERBS_EX_CMD_QUERY_DEVICE
+
+
+发起连接请求
+int rdma_connect(struct rdma_cm_id *id, struct rdma_conn_param *conn_param)
+cmd = UCMA_CMD_CONNECT
+ucma_copy_conn_param_to_kern
+  dst->retry_count = 7;   // 无限次重试
+	dst->rnr_retry_count = 7; // 无限次重试
+ucma_copy_ece_param_to_kern_req
+ret = write(id->channel->fd, &cmd, sizeof cmd)
+
+
+
+
+
+
+
