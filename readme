@@ -1,6 +1,7 @@
 原路径: https://github.com/linux-rdma/rdma-core.git
 GIT仓库: https://github.com/ssbandjl/rdma-core.git
 
+intel rdma ref: https://blog.csdn.net/bandaoyu/article/details/116203690
 
 
 fork支持:
@@ -47,5 +48,140 @@ split and join cmd:
 IB_USER_VERBS_CMD_
 
 
+
+
+intel irdma:
+providers/irdma/umain.c
+irdma_device_alloc
+static const struct verbs_device_ops irdma_udev_ops = {
+	.alloc_context = irdma_ualloc_context,
+	.alloc_device = irdma_device_alloc,
+	.match_max_abi_version = IRDMA_MAX_ABI_VERSION,
+	.match_min_abi_version = IRDMA_MIN_ABI_VERSION,
+	.match_table = hca_table,
+	.name = "irdma",
+	.uninit_device = irdma_uninit_device,
+};
+
+
+
+api:
+verbs.c
+.alloc_pd 
+
+
+static const struct verbs_context_ops irdma_uctx_ops = {
+	.alloc_mw = irdma_ualloc_mw,
+	.alloc_pd = irdma_ualloc_pd,
+	.attach_mcast = irdma_uattach_mcast,
+	.bind_mw = irdma_ubind_mw,
+	.cq_event = irdma_cq_event,
+	.create_ah = irdma_ucreate_ah,
+	.create_cq = irdma_ucreate_cq,
+	.create_cq_ex = irdma_ucreate_cq_ex,
+	.create_qp = irdma_ucreate_qp,
+	.dealloc_mw = irdma_udealloc_mw,
+	.dealloc_pd = irdma_ufree_pd,
+	.dereg_mr = irdma_udereg_mr,
+	.destroy_ah = irdma_udestroy_ah,
+	.destroy_cq = irdma_udestroy_cq,
+	.destroy_qp = irdma_udestroy_qp,
+	.detach_mcast = irdma_udetach_mcast,
+	.modify_qp = irdma_umodify_qp,
+	.poll_cq = irdma_upoll_cq,
+	.post_recv = irdma_upost_recv,
+	.post_send = irdma_upost_send,
+	.query_device_ex = irdma_uquery_device_ex,
+	.query_port = irdma_uquery_port,
+	.query_qp = irdma_uquery_qp,
+	.reg_dmabuf_mr = irdma_ureg_mr_dmabuf,
+	.reg_mr = irdma_ureg_mr,
+	.rereg_mr = irdma_urereg_mr,
+	.req_notify_cq = irdma_uarm_cq,
+	.resize_cq = irdma_uresize_cq,
+	.free_context = irdma_ufree_context,
+};
+
+
+
+enum ib_uverbs_write_cmds {
+	IB_USER_VERBS_CMD_GET_CONTEXT,
+	IB_USER_VERBS_CMD_QUERY_DEVICE,
+	IB_USER_VERBS_CMD_QUERY_PORT,
+	IB_USER_VERBS_CMD_ALLOC_PD,
+	IB_USER_VERBS_CMD_DEALLOC_PD,
+	IB_USER_VERBS_CMD_CREATE_AH,
+	IB_USER_VERBS_CMD_MODIFY_AH,
+	IB_USER_VERBS_CMD_QUERY_AH,
+	IB_USER_VERBS_CMD_DESTROY_AH,
+	IB_USER_VERBS_CMD_REG_MR,
+	IB_USER_VERBS_CMD_REG_SMR,
+	IB_USER_VERBS_CMD_REREG_MR,
+	IB_USER_VERBS_CMD_QUERY_MR,
+	IB_USER_VERBS_CMD_DEREG_MR,
+	IB_USER_VERBS_CMD_ALLOC_MW,
+	IB_USER_VERBS_CMD_BIND_MW,
+	IB_USER_VERBS_CMD_DEALLOC_MW,
+	IB_USER_VERBS_CMD_CREATE_COMP_CHANNEL,
+	IB_USER_VERBS_CMD_CREATE_CQ,
+	IB_USER_VERBS_CMD_RESIZE_CQ,
+	IB_USER_VERBS_CMD_DESTROY_CQ,
+	IB_USER_VERBS_CMD_POLL_CQ,
+	IB_USER_VERBS_CMD_PEEK_CQ,
+	IB_USER_VERBS_CMD_REQ_NOTIFY_CQ,
+	IB_USER_VERBS_CMD_CREATE_QP,
+	IB_USER_VERBS_CMD_QUERY_QP,
+	IB_USER_VERBS_CMD_MODIFY_QP,
+	IB_USER_VERBS_CMD_DESTROY_QP,
+	IB_USER_VERBS_CMD_POST_SEND,
+	IB_USER_VERBS_CMD_POST_RECV,
+	IB_USER_VERBS_CMD_ATTACH_MCAST,
+	IB_USER_VERBS_CMD_DETACH_MCAST,
+	IB_USER_VERBS_CMD_CREATE_SRQ,
+	IB_USER_VERBS_CMD_MODIFY_SRQ,
+	IB_USER_VERBS_CMD_QUERY_SRQ,
+	IB_USER_VERBS_CMD_DESTROY_SRQ,
+	IB_USER_VERBS_CMD_POST_SRQ_RECV,
+	IB_USER_VERBS_CMD_OPEN_XRCD,
+	IB_USER_VERBS_CMD_CLOSE_XRCD,
+	IB_USER_VERBS_CMD_CREATE_XSRQ,
+	IB_USER_VERBS_CMD_OPEN_QP,
+};
+
+
+
+
+DECLARE_CMD(IB_USER_VERBS_CMD_ALLOC_PD, ibv_alloc_pd, ib_uverbs_alloc_pd);
+ib_uverbs_alloc_pd
+
+
+irdma_ualloc_pd
+	ibv_cmd_alloc_pd -> 分配保护域,返回其指针
+		execute_cmd_write IB_USER_VERBS_CMD_ALLOC_PD -> #define execute_cmd_write(ctx, enum, cmd, cmd_size, resp, resp_size)
+			ioctl_ptr_to_u64
+			_execute_cmd_write
+				cmd + check_type(cmd, IBV_ABI_REQ(enum) *)
+				return ioctl_write -> ioctl_write 比 write 更安全
+					fill_attr_const_in -> #define fill_attr_const_in(cmd, attr_id, _data)
+					return execute_ioctl(ctx, cmdb) -> 动词：为 kabi ioctl 添加基本基础设施支持 这些宏和辅助函数可帮助从调用命令构建 ioctl 消息。 该方案使用属性缓冲区的链接列表，其思想是驱动程序和核心堆栈帧将在堆栈上分配这些缓冲区。 ioctl 包装器将所有缓冲区集中到一个线性数组中，并将其传递给内核，然后将答案分散回它们的来源处。 提供了一系列“填充”帮助程序，它们反映了内核中的提取帮助程序。 每个属性都应与与内核中的内容相匹配的填充帮助程序类型一起使用
+						prepare_attrs
+						ioctl(context->cmd_fd, RDMA_VERBS_IOCTL, &cmd->hdr) -> 用户态 -> 内核态
+						finalize_attrs
+
+				
+
+
+verbs_init_context
+    context_ex->priv->use_ioctl_write = has_ioctl_write(context);
+
+verbs_init_and_alloc_context
+
+
+irdma_ualloc_context
+
+.alloc_context = irdma_ualloc_context
+
+ibv_open_device
+verbs_open_device
 
 
