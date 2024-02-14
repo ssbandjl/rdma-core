@@ -130,3 +130,275 @@ ret = write(id->channel->fd, &cmd, sizeof cmd)
 
 
 
+ibv_advise_mr
+ibv_alloc_dm
+ibv_open_device
+ibv_get_device_list
+ibv_query_device_ex
+ibv_get_device_name
+ibv_req_notify_cq
+ibv_query_gid
+ibv_memcpy_to_dm
+ibv_get_cq_event
+ibv_start_poll
+ibv_end_poll
+ibv_next_poll
+ibv_wc_read_completion_ts
+ibv_ack_cq_events
+ibv_free_device_list
+ibv_cq_ex_to_cq
+ibv_modify_qp
+
+
+
+ibv_open_device -> LATEST_SYMVER_FUNC(ibv_open_device -> verbs_open_device
+    verbs_get_device
+    cmd_fd = open_cdev -> verbs：启用 verbs_open_device() 以在非 sysfs 设备上工作，从 mlx5 开始，启用 verbs_open_device() 通过 VFIO 在非 sysfs 设备上工作。 verbs_sysfs_dev 上的任何其他 API 都应该彻底失败
+    verbs_device->ops->alloc_context -> mlx5_alloc_context -> verbs：始终分配 verbs_context，现在所有内容都在一棵树中，我们可以修改旧版 init_context 路径，通过在所有提供程序的包装结构中将 ibv_context 交换为 verbs_context 来始终分配 verbs_context。 为了保持提供者差异最小，这个补丁同时做了几件事： - 引入 verbs_init_and_alloc_context() 宏。 这会为每个驱动程序分配、清零并初始化 verbs_context。 值得注意的是，这个新宏在失败时根据需要正确设置 errno。 - 从所有驱动程序、calloc、malloc、memset、cmd_fd 和设备分配中删除样板文件 - 与 verbs_init 方案一起必然出现 verbs_uninit 方案，该方案将 uninit 调用降低到提供者而不是公共代码中。 这使我们能够在 init 错误路径上正确地 uninit。 总之，这遵循我们在内核中看到的相当成功的模式，用于对子系统进行驱动程序初始化。 此外，这会将 ibv_cmd_get_context 更改为接受 verbs_context，因为大多数调用者现在都提供该内容，这使得差异较小。 这使得整个流程更加一致，并且可以让我们消除 init_context 流程
+        mlx5_init_context
+            verbs_init_and_alloc_context -> _verbs_init_and_alloc_context
+                verbs_init_context
+                    ibverbs_device_hold
+                    verbs_set_ops(context_ex, &verbs_dummy_ops) -> rdma verbs操作 -> 在上下文中设置 -> 如果更改，则必须更改 PRIVATE IBVERBS_PRIVATE_ 符号。 这是驱动程序可以支持的每个操作的联合。 如果向此结构添加新元素，则 verbs_dummy_ops 也必须更新。 保持排序
+                        SET_OP -> 设置一系列操作
+                        ...
+                    use_ioctl_write = has_ioctl_write(context)
+            mlx5_open_debug_file
+            mlx5_set_debug_mask
+            single_threaded_app
+            get_uar_info
+                get_total_uuars
+                get_num_low_lat_uuars
+        mlx5_cmd_get_context
+            ibv_cmd_get_context
+                ...
+                execute_write_bufs(context, IB_USER_VERBS_CMD_GET_CONTEXT
+        mlx5_set_context
+            adjust_uar_info
+            cl_qmap_init
+            mlx5_mmap
+            mlx5_read_env
+            verbs_set_ops(v_ctx, &mlx5_ctx_common_ops)
+            mlx5_query_device_ctx
+                get_hca_general_caps
+                    mlx5dv_devx_general_cmd MLX5_CMD_OP_QUERY_HCA_CAP
+                ibv_cmd_query_device_any
+                    execute_cmd_write_ex IB_USER_VERBS_EX_CMD_QUERY_DEVICE
+                    execute_cmd_write(context, IB_USER_VERBS_CMD_QUERY_DEVICE -> 转到内核态
+            mlx5_set_singleton_nc_uar
+    set_lib_ops
+    ibv_cmd_alloc_async_fd
+
+
+
+
+
+rdma verbs ops
+const struct verbs_context_ops verbs_dummy_ops = {
+	advise_mr,
+	alloc_dm,
+	alloc_mw,
+	alloc_null_mr,
+	alloc_parent_domain,
+	alloc_pd,
+	alloc_td,
+	async_event,
+	attach_counters_point_flow,
+	attach_mcast,
+	bind_mw,
+	close_xrcd,
+	cq_event,
+	create_ah,
+	create_counters,
+	create_cq,
+	create_cq_ex,
+	create_flow,
+	create_flow_action_esp,
+	create_qp,
+	create_qp_ex,
+	create_rwq_ind_table,
+	create_srq,
+	create_srq_ex,
+	create_wq,
+	dealloc_mw,
+	dealloc_pd,
+	dealloc_td,
+	dereg_mr,
+	destroy_ah,
+	destroy_counters,
+	destroy_cq,
+	destroy_flow,
+	destroy_flow_action,
+	destroy_qp,
+	destroy_rwq_ind_table,
+	destroy_srq,
+	destroy_wq,
+	detach_mcast,
+	free_context,
+	free_dm,
+	get_srq_num,
+	import_dm,
+	import_mr,
+	import_pd,
+	modify_cq,
+	modify_flow_action_esp,
+	modify_qp,
+	modify_qp_rate_limit,
+	modify_srq,
+	modify_wq,
+	open_qp,
+	open_xrcd,
+	poll_cq,
+	post_recv,
+	post_send,
+	post_srq_ops,
+	post_srq_recv,
+	query_device_ex,
+	query_ece,
+	query_port,
+	query_qp,
+	query_qp_data_in_order,
+	query_rt_values,
+	query_srq,
+	read_counters,
+	reg_dm_mr,
+	reg_dmabuf_mr,
+	reg_mr,
+	req_notify_cq,
+	rereg_mr,
+	resize_cq,
+	set_ece,
+	unimport_dm,
+	unimport_mr,
+	unimport_pd,
+};
+
+设置rdma verbs操作:
+static const struct verbs_context_ops mlx5_ctx_common_ops = {
+	.query_port    = mlx5_query_port,
+	.alloc_pd      = mlx5_alloc_pd,
+	.async_event   = mlx5_async_event,
+	.dealloc_pd    = mlx5_free_pd,
+	.reg_mr	       = mlx5_reg_mr,
+	.reg_dmabuf_mr = mlx5_reg_dmabuf_mr,
+	.rereg_mr      = mlx5_rereg_mr,
+	.dereg_mr      = mlx5_dereg_mr,
+	.alloc_mw      = mlx5_alloc_mw,
+	.dealloc_mw    = mlx5_dealloc_mw,
+	.bind_mw       = mlx5_bind_mw,
+	.create_cq     = mlx5_create_cq,
+	.poll_cq       = mlx5_poll_cq,
+	.req_notify_cq = mlx5_arm_cq,
+	.cq_event      = mlx5_cq_event,
+	.resize_cq     = mlx5_resize_cq,
+	.destroy_cq    = mlx5_destroy_cq,
+	.create_srq    = mlx5_create_srq,
+	.modify_srq    = mlx5_modify_srq,
+	.query_srq     = mlx5_query_srq,
+	.destroy_srq   = mlx5_destroy_srq,
+	.post_srq_recv = mlx5_post_srq_recv,
+	.create_qp     = mlx5_create_qp,
+	.query_qp      = mlx5_query_qp,
+	.modify_qp     = mlx5_modify_qp,
+	.destroy_qp    = mlx5_destroy_qp,
+	.post_send     = mlx5_post_send,
+	.post_recv     = mlx5_post_recv,
+	.create_ah     = mlx5_create_ah,
+	.destroy_ah    = mlx5_destroy_ah,
+	.attach_mcast  = mlx5_attach_mcast,
+	.detach_mcast  = mlx5_detach_mcast,
+
+	.advise_mr = mlx5_advise_mr,
+	.alloc_dm = mlx5_alloc_dm,
+	.alloc_parent_domain = mlx5_alloc_parent_domain,
+	.alloc_td = mlx5_alloc_td,
+	.attach_counters_point_flow = mlx5_attach_counters_point_flow,
+	.close_xrcd = mlx5_close_xrcd,
+	.create_counters = mlx5_create_counters,
+	.create_cq_ex = mlx5_create_cq_ex,
+	.create_flow = mlx5_create_flow,
+	.create_flow_action_esp = mlx5_create_flow_action_esp,
+	.create_qp_ex = mlx5_create_qp_ex,
+	.create_rwq_ind_table = mlx5_create_rwq_ind_table,
+	.create_srq_ex = mlx5_create_srq_ex,
+	.create_wq = mlx5_create_wq,
+	.dealloc_td = mlx5_dealloc_td,
+	.destroy_counters = mlx5_destroy_counters,
+	.destroy_flow = mlx5_destroy_flow,
+	.destroy_flow_action = mlx5_destroy_flow_action,
+	.destroy_rwq_ind_table = mlx5_destroy_rwq_ind_table,
+	.destroy_wq = mlx5_destroy_wq,
+	.free_dm = mlx5_free_dm,
+	.get_srq_num = mlx5_get_srq_num,
+	.import_dm = mlx5_import_dm,
+	.import_mr = mlx5_import_mr,
+	.import_pd = mlx5_import_pd,
+	.modify_cq = mlx5_modify_cq,
+	.modify_flow_action_esp = mlx5_modify_flow_action_esp,
+	.modify_qp_rate_limit = mlx5_modify_qp_rate_limit,
+	.modify_wq = mlx5_modify_wq,
+	.open_qp = mlx5_open_qp,
+	.open_xrcd = mlx5_open_xrcd,
+	.post_srq_ops = mlx5_post_srq_ops,
+	.query_device_ex = mlx5_query_device_ex,
+	.query_ece = mlx5_query_ece,
+	.query_rt_values = mlx5_query_rt_values,
+	.read_counters = mlx5_read_counters,
+	.reg_dm_mr = mlx5_reg_dm_mr,
+	.alloc_null_mr = mlx5_alloc_null_mr,
+	.free_context = mlx5_free_context,
+	.set_ece = mlx5_set_ece,
+	.unimport_dm = mlx5_unimport_dm,
+	.unimport_mr = mlx5_unimport_mr,
+	.unimport_pd = mlx5_unimport_pd,
+	.query_qp_data_in_order = mlx5_query_qp_data_in_order,
+};
+
+
+
+代码路径: rdma-core, libibverbs/device.c
+ibv_get_device_list
+    ibverbs_get_device_list -> verbs: 刷新缓存的 ibv_device 列表 问题 ======== 目前，libibverbs 仅在第一次调用 ibv_get_device_list 时构建缓存的 ibv_device 列表，因此无论硬件是否发生变化，该列表都不会更新。 系统。 解决方案======== 修改 ibv_get_device_list() 的实现，以便连续的调用将以与今天相同的方式重新扫描 sysfs，以便每次创建一个新的 ibv_device 列表。 为此，将缓存的设备列表更改为真正的链表而不是动态数组。 我们如何识别新设备​============================= 根据 /sys/class/infiniband_verbs/ 的时间戳创建来识别同一设备 uverbs%d/ibdev。 我们使用 stat 系统调用获取文件状态，并使用 st_mtime 字段来实现此目的。 当我们重新扫描 sysfs 设备时，我们会检查每个 sysfs 设备是否已经在上次扫描中，如果没有，则分配新的 ibv_device 并将其添加到缓存设备列表中。 本系列的下一个补丁处理设备不再使用的情况。 注意：此补丁根据上面 verbs_device 结构体注释中的要求更改了 IBVERBS_PRIVATE 符号
+        find_sysfs_devs_nl -> verbs：使用 netlink 来发现 uverbs 设备而不是 sysfs，netlink 查询为我们提供了 ibdev idx，它对于设备来说大多是唯一的，并且在设备重命名时充当稳定的 id。 如果在 verbs 用户操作期间重命名设备，这会使 verbs 更加健壮。 此外，netlink 仅返回在进程的网络命名空间中实际可见的设备，从而简化了发现过程
+            rdmanl_socket_alloc
+                nl_socket_alloc
+                nl_socket_disable_auto_ack
+                nl_socket_disable_msg_peek
+                nl_connect(nl, NETLINK_RDMA)
+            rdmanl_get_devices find_sysfs_devs_nl_cb
+                nl_send_simple RDMA_NL_GET_TYPE(RDMA_NL_NLDEV, RDMA_NLDEV_CMD_GET) NLM_F_DUMP
+                nl_socket_modify_err_cb
+                nl_socket_modify_cb
+                nl_recvmsgs_default
+            find_uverbs_nl find_uverbs_sysfs try_access_device
+                rdmanl_get_chardev(nl, sysfs_dev->ibdev_idx, "uverbs", find_uverbs_nl_cb
+                    nlmsg_alloc_simple RDMA_NLDEV_CMD_GET_CHARDEV
+                    ...
+                    check_snprintf(path, sizeof(path), "%s/device/infiniband_verbs",
+                    setup_sysfs_uverbs
+                        abi_version
+                    ...
+                    stat(devpath, &cdev_stat)
+            nl_socket_free
+        find_sysfs_devs
+            %s/class/infiniband_verbs
+            ibv_read_sysfs_file_at(uv_dirfd, "ibdev", 
+        check_abi_version
+            "class/infiniband_verbs/abi_version"
+        try_all_drivers
+            try_drivers
+                match_driver_id -> VERBS_MATCH_SENTINEL -> 动词：提供通用代码以将提供程序与内核设备进行匹配 根据表检查 PCI 设备基本上在每个驱动程序中都是重复的。 遵循内核的模式，并将匹配表附加到 verbs_device_ops 驱动程序入口点，该入口点描述提供程序可以处理的所有内核设备，并使核心代码与该表匹配。 驱动程序获取一个指向与分配函数中匹配的表条目的指针。 此实现基于模式别名，而不是读取 PCI 特定供应商和设备文件。 modalias 让我们支持 ACPI 和 OF 提供程序，并提供了一个简单的路径，使提供程序根据其支持的 modalias 字符串（如内核）进行需求加载
+                try_driver
+                    match_device
+                    alloc_device -> mlx5_device_alloc
+                    dev->transport_type = IBV_TRANSPORT_IB -> 传输类型
+                    ...
+        load_drivers
+            dlhandle = dlopen(so_name, RTLD_NOW)
+    ibverbs_device_hold
+
+
+
+
+query_device_ex -> mlx5_query_device_ex
+    
