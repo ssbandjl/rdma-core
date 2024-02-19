@@ -69,6 +69,9 @@ api:
 verbs.c
 .alloc_pd 
 
+ibv_post_send
+	qp->context->ops.post_send(qp, wr, bad_wr)
+	.post_send =  xxx
 
 static const struct verbs_context_ops irdma_uctx_ops = {
 	.alloc_mw = irdma_ualloc_mw,
@@ -184,4 +187,45 @@ irdma_ualloc_context
 ibv_open_device
 verbs_open_device
 
+
+irdma_upost_send
+IRDMA_RING_MORE_WORK
+while (ib_wr)
+	case IBV_WR_SEND
+		irdma_uk_inline_send or
+		irdma_uk_send
+	case IBV_WR_RDMA_WRITE
+		irdma_uk_inline_rdma_write or
+		irdma_uk_rdma_write
+
+
+
+
+libibverbs/examples/CMakeLists.txt
+rdma_executable(ibv_rc_pingpong rc_pingpong.c)
+libibverbs/examples/rc_pingpong.c -> main
+ibv_get_device_list
+pp_init_ctx
+pp_post_recv
+ibv_req_notify_cq
+pp_get_port_info
+pp_client_exch_dest or
+pp_server_exch_dest
+pp_connect_ctx
+ibv_memcpy_to_dm
+pp_post_send
+pp_cq
+ibv_start_poll
+
+
+rdma_executable(ibv_devices device_list.c)
+rdma_executable(ibv_devinfo devinfo.c)
+	print_hca_cap
+		ibv_open_device
+		ibv_query_device_ex
+		ibv_read_sysfs_file
+		ibv_query_port
+		print_all_port_gids
+			ibv_query_gid
+			ibv_query_gid_type
 
