@@ -148,7 +148,40 @@ ibv_wc_read_completion_ts
 ibv_ack_cq_events
 ibv_free_device_list
 ibv_cq_ex_to_cq
+ibv_create_qp
 ibv_modify_qp
+
+ibv_modify_qp
+.modify_qp = irdma_umodify_qp,
+	ibv_cmd_modify_qp_ex
+		copy_modify_qp_fields
+			...
+			cmd->retry_cnt = attr->retry_cnt
+			...
+		execute_cmd_write_ex IB_USER_VERBS_EX_CMD_MODIFY_QP -> to kernel
+	irdma_mmap
+	or ibv_cmd_modify_qp
+
+
+
+ibv_create_qp
+.create_qp = irdma_ucreate_qp,
+...
+info.abi_ver = iwvctx->abi_ver -> 设置参数
+...
+irdma_uk_calc_depth_shift_sq -> 提供商/irdma：允许准确报告 QP 最大发送/接收 WR ，目前，在创建 QP 期间从用户空间发送的属性 cap.max_send_wr 和 cap.max_recv_wr 是提供商计算的 SQ/RQ 深度，而不是从应用程序传递的原始值。 这会禁止在内核中计算该 QP 的 max_send_wr 和 max_recv_wr 的准确值，该值与用户创建 QP 中返回的值相匹配。 此外，这些功能还需要在查询 QP 中从驱动程序报告。 通过扩展 ABI 添加支持，以允许从用户空间传递原始 cap.max_send_wr 和 cap.max_recv_wr，同时保持对旧方案的兼容性。 添加新的助手来协助完成此操作：irdma_uk_calc_depth_shift_sq、irdma_uk_calc_depth_shift_rq
+	irdma_get_wqe_shift
+	irdma_get_sqdepth
+iwuqp = memalign(1024, sizeof(*iwuqp)) -> 在GNU系统中，malloc或realloc返回的内存块地址都是8的倍数（如果是64位系统，则为16的倍数）。如果你需要更大的粒度，请使用memalign或valloc
+irdma_uk_calc_depth_shift_rq
+irdma_vmapped_qp(iwuqp, pd, attr, &info, iwvctx->legacy_mode)
+	irdma_alloc_hw_buf
+	reg_mr_cmd.reg_type = IRDMA_MEMREG_TYPE_QP
+	ibv_cmd_reg_mr
+		execute_cmd_write(pd->context, IB_USER_VERBS_CMD_REG_MR -> to kernel
+	ibv_cmd_create_qp
+irdma_uk_qp_init
+
 
 
 
@@ -452,3 +485,27 @@ static const struct verbs_context_ops irdma_uctx_ops = {
 };
 
 
+LATEST_SYMVER_FUNC(ibv_alloc_pd
+.alloc_pd      = mlx5_alloc_pd
+	ibv_cmd_alloc_pd
+		 execute_cmd_write(context, IB_USER_VERBS_CMD_ALLOC_PD -> 转到内核处理
+	pthread_mutex_init(&pd->opaque_mr_mutex, NULL -> mlx5：引入 mlx5dv_wr_memcpy builder ，引入 mlx5dv_wr_memcpy 用于构建 DMA memcpy 请求。 DMA memcpy 是从 BlueField-2 开始提供的多种内存到内存卸载 (MMO) 之一。 它利用 DPU 上的 GGA 模块执行从 src 到 dest 的 DMA memcpy，从而提高性能。 src 和 dest 可以是主机和 SoC 的任意组合。 请注意，在 Host 到 SoC 或 SoC 到 Host memcpy 的情况下，需要特殊的跨 gvmi MKey
+
+
+
+
+poll_cq
+	mlx5_stall_cycles_poll_cq
+	or mlx5_stall_poll_cq
+	mlx5_poll_one
+		mlx5_get_next_cqe -> 添加惰性CQ轮询，目前，当用户想要轮询CQ是否完成时，他别无选择，只能获得整个工作完成（WC）。 这有几个含义 - 例如： * 扩展 WC 是有限的，因为添加新字段会使 WC 更大并且可能占用更多缓存行。 * 每个字段都被复制到 WC - 甚至是用户不关心的字段。 此补丁添加了对以惰性方式处理 CQE 的一些支持。 新的惰性模式将在下游补丁中调用。 我们只解析必需的字段，以便找出 CQE，例如类型、状态、wr_id 等。为了与遗留模式共享代码而不影响性能，对遗留代码进行了重构，并使用了“always_inline”机制，以便 分支条件将在编译时被删除
+			next_cqe_sw
+				...
+				return cq->active_buf->buf + n * cq->cqe_sz
+			VALGRIND_MAKE_MEM_DEFINED -> memory check
+			dump_cqe
+		mlx5_parse_cqe -> 多分支函数
+			case MLX5_CQE_REQ
+			...
+	update_cons_index
+	mlx5_get_cycles
