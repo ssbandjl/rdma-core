@@ -232,3 +232,78 @@ rdma_executable(ibv_devinfo devinfo.c)
 
 
 irdma_ucreate_qp
+
+
+buid, make:
+export ROOT=$(dirname $PWD)
+export BUILD_DIR=$ROOT/build
+export BIN=$BUILD_DIR/bin
+export LIB=$BUILD_DIR/lib
+export PYTHONPATH=$BUILD_DIR/python:$BUILD_DIR/python/pyverbs
+export LD_LIBRARY_PATH=$LIB
+export PATH=$BIN:$PATH
+. ~/rdma-core-env.sh
+which rping
+
+
+
+bash build.sh
+	CMAKE
+	NINJA
+	cmake -DIN_PLACE=1 ..
+CMakeLists.txt
+
+
+
+cmake参数说明:
+传递给 cmake 的常见选项有：
+  -DIN_PLACE=1
+      将构建配置为从构建目录运行，这会产生一些结果
+      那是不可安装的。
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=1
+      为 clang 工具编写一个compile_commands.json 文件
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      更改优化级别，调试禁用优化，
+      发布适用于打包者
+  -DENABLE_VALGRIND=0（默认启用）
+      禁用 valgrind 符号，这对性能有微小的积极影响
+  -DENABLE_RESOLVE_NEIGH=0（默认启用）
+      不要链接到 libnl，也不在内部解析以太网的邻居，
+      并且不要构建 iwpmd。
+  -DENABLE_STATIC=1（默认禁用）
+      生成静态库以及常用的共享库。
+  -DVERBS_PROVIDER_DIR='' （默认 /usr/lib.../libibverbs）
+      使用标准系统库中提供者的历史搜索路径。
+  -DNO_COMPAT_SYMS=1（默认禁用）
+      不要在共享中生成向后兼容符号
+      图书馆。 如果使用动态链接器，这可能是必要的
+      不支持符号版本，例如uclibc。
+  -DIOCTL_MODE=写入（默认两者）
+      禁用新的 kABI ioctl() 支持并仅支持旧写入
+      小路。 也可以是“ioctl”来禁用回退写入。
+  -DIBACM_SERVER_MODE_DEFAULT（默认unix）
+      选择客户端连接到此服务器的方式：
+      open) 允许来自任何 TCP 客户端（内部或外部）的传入连接。
+      循环）将 server_port 的传入连接限制为 127.0.0.1。
+      unix) 使用 unix 域套接字，因此限制对同一台机器的服务。
+  -DIBACM_ACME_PLUS_KERNEL_ONLY_DEFAULT（默认0）
+      如果非零，则限制对内核或 ib_acme 实用程序的传入请求
+      （即不服务 librdmacm 请求）
+  -DPYTHON_EXECUTABLE
+      覆盖 python 的自动检测以使用特定的
+      可执行的。 这可以用来强制构建在 a 上使用 python2
+      安装了 python3 的系统。 否则自动构建
+      如果可用的话，更喜欢 python3。
+   -DNO_PYVERBS=1（默认，构建 pyverbs）
+      调用 cython 来构建 pyverbs。 通常您将使用此选项运行
+      放
+   -DENABLE_IBDIAGS_COMPAT=True（默认False）
+      包括过时的脚本。 这些脚本被 C 程序替换为
+      现在是一个不同的界面。
+   -DNO_MAN_PAGES=1（默认 0，构建/安装手册页）
+      禁用手册页。 允许构建和安装 rdma-core
+      （没有手册页）当既不是 pandoc/rst2man 也不是 pandoc-prebuilt 时
+      目录可用。
+   -DENABLE_LTTNG（默认，不支持跟踪）
+      启用 LTTng 跟踪。
+
