@@ -20,7 +20,7 @@ ibv_req_notify_cq -> na_ofi_poll_try_wait -> fi_trywait -> vrb_trywait -> vrb_cq
 rdma_create_qp -> na_ofi_context_create -> fi_enable -> rdma_create_qp
 ibv_reg_mr -> NA_Mem_register -> na_ofi_mem_register -> fi_mr_regv -> ibv_reg_mr
 ------------------
-轮训完成队列
+轮询完成队列
 ibv_poll_cq -> na_ofi_msg_send_unexpected -> fi_senddata -> fi_send -> vrb_flush_cq -> ibv_poll_cq
 
 接收端提前往接收队列放置工作请求WR
@@ -181,7 +181,8 @@ irdma_vmapped_qp(iwuqp, pd, attr, &info, iwvctx->legacy_mode)
     reg_mr_cmd.reg_type = IRDMA_MEMREG_TYPE_QP
     ibv_cmd_reg_mr
         execute_cmd_write(pd->context, IB_USER_VERBS_CMD_REG_MR -> to kernel
-    ibv_cmd_create_qp -> ibv_icmd_create_qp
+    ibv_cmd_create_qp-> DECLARE_CMD_BUFFER_COMPAT(cmdb, UVERBS_OBJECT_QP, UVERBS_METHOD_QP_CREATE, cmd, cmd_size, resp, resp_size); -> ibv_icmd_create_qp
+        DECLARE_FBCMD_BUFFER(cmdb, UVERBS_OBJECT_QP, UVERBS_METHOD_QP_CREATE, 15, link)
         fill_attr_in_obj
         fallback_require_ex
         fallback_require_ioctl
@@ -659,6 +660,7 @@ static inline int ibv_poll_cq -> .poll_cq = irdma_upoll_cq, -> 轮询 CQ 以获�
                     int ret = irdma_uk_cq_poll_cmpl(ukcq, cur_cqe)
                         cqe = IRDMA_GET_CURRENT_CQ_ELEM(cq) -> ( (cq)->cq_base[(((cq)->cq_ring).head)].buf ) -> get cqe from cq_ring head
                         get_64bit_val(cqe, 24, &qword3)
+                        polarity = (__u8)FIELD_GET(IRDMA_CQ_VALID, qword3)
                         return ENONENT -> providers/irdma：删除 enum irdma_status_code ，- 用 Linux 错误代码替换自定义 irdma 状态代码的使用。 - 删除枚举 irdma_status_code 和定义它的头文件。 - 删除某些函数中多余的“ret”变量。 由于 irdma_status_code 被替换为 int，因此不需要两个变量来保存错误代码。 - 删除不再需要的冗余初始化
                         udma_from_device_barrier(); -> 确保检查有效位后读取 CQE 内容 -> asm volatile("lfence" ::: "memory")
                         ...
@@ -758,3 +760,6 @@ enum ibv_wc_status {
 	IBV_WC_TM_RNDV_INCOMPLETE,
 };
 
+
+irdma_ureg_mr
+    ibv_cmd_reg_mr
