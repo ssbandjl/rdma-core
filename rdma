@@ -20,7 +20,7 @@ ibv_req_notify_cq -> na_ofi_poll_try_wait -> fi_trywait -> vrb_trywait -> vrb_cq
 rdma_create_qp -> na_ofi_context_create -> fi_enable -> rdma_create_qp
 ibv_reg_mr -> NA_Mem_register -> na_ofi_mem_register -> fi_mr_regv -> ibv_reg_mr
 ------------------
-轮训完成队列
+轮询完成队列
 ibv_poll_cq -> na_ofi_msg_send_unexpected -> fi_senddata -> fi_send -> vrb_flush_cq -> ibv_poll_cq
 
 接收端提前往接收队列放置工作请求WR
@@ -181,7 +181,8 @@ irdma_vmapped_qp(iwuqp, pd, attr, &info, iwvctx->legacy_mode)
     reg_mr_cmd.reg_type = IRDMA_MEMREG_TYPE_QP
     ibv_cmd_reg_mr
         execute_cmd_write(pd->context, IB_USER_VERBS_CMD_REG_MR -> to kernel
-    ibv_cmd_create_qp -> ibv_icmd_create_qp
+    ibv_cmd_create_qp-> DECLARE_CMD_BUFFER_COMPAT(cmdb, UVERBS_OBJECT_QP, UVERBS_METHOD_QP_CREATE, cmd, cmd_size, resp, resp_size); -> ibv_icmd_create_qp
+        DECLARE_FBCMD_BUFFER(cmdb, UVERBS_OBJECT_QP, UVERBS_METHOD_QP_CREATE, 15, link)
         fill_attr_in_obj
         fallback_require_ex
         fallback_require_ioctl
@@ -196,16 +197,22 @@ irdma_uk_qp_init
 
 ibv_open_device -> LATEST_SYMVER_FUNC(ibv_open_device -> verbs_open_device
     verbs_get_device
+        container_of(dev, struct verbs_device, device)
     cmd_fd = open_cdev -> verbs：启用 verbs_open_device() 以在非 sysfs 设备上工作，从 mlx5 开始，启用 verbs_open_device() 通过 VFIO 在非 sysfs 设备上工作。 verbs_sysfs_dev 上的任何其他 API 都应该彻底失败
-    verbs_device->ops->alloc_context -> mlx5_alloc_context -> verbs：始终分配 verbs_context，现在所有内容都在一棵树中，我们可以修改旧版 init_context 路径，通过在所有提供程序的包装结构中将 ibv_context 交换为 verbs_context 来始终分配 verbs_context。 为了保持提供者差异最小，这个补丁同时做了几件事： - 引入 verbs_init_and_alloc_context() 宏。 这会为每个驱动程序分配、清零并初始化 verbs_context。 值得注意的是，这个新宏在失败时根据需要正确设置 errno。 - 从所有驱动程序、calloc、malloc、memset、cmd_fd 和设备分配中删除样板文件 - 与 verbs_init 方案一起必然出现 verbs_uninit 方案，该方案将 uninit 调用降低到提供者而不是公共代码中。 这使我们能够在 init 错误路径上正确地 uninit。 总之，这遵循我们在内核中看到的相当成功的模式，用于对子系统进行驱动程序初始化。 此外，这会将 ibv_cmd_get_context 更改为接受 verbs_context，因为大多数调用者现在都提供该内容，这使得差异较小。 这使得整个流程更加一致，并且可以让我们消除 init_context 流程
+    context_ex = verbs_device->ops->alloc_context(device, cmd_fd, private_data) -> mlx5_alloc_context -> verbs：始终分配 verbs_context，现在所有内容都在一棵树中，我们可以修改旧版 init_context 路径，通过在所有提供程序的包装结构中将 ibv_context 交换为 verbs_context 来始终分配 verbs_context。 为了保持提供者差异最小，这个补丁同时做了几件事： - 引入 verbs_init_and_alloc_context() 宏。 这会为每个驱动程序分配、清零并初始化 verbs_context。 值得注意的是，这个新宏在失败时根据需要正确设置 errno。 - 从所有驱动程序、calloc、malloc、memset、cmd_fd 和设备分配中删除样板文件 - 与 verbs_init 方案一起必然出现 verbs_uninit 方案，该方案将 uninit 调用降低到提供者而不是公共代码中。 这使我们能够在 init 错误路径上正确地 uninit。 总之，这遵循我们在内核中看到的相当成功的模式，用于对子系统进行驱动程序初始化。 此外，这会将 ibv_cmd_get_context 更改为接受 verbs_context，因为大多数调用者现在都提供该内容，这使得差异较小。 这使得整个流程更加一致，并且可以让我们消除 init_context 流程
         mlx5_init_context
-            verbs_init_and_alloc_context -> _verbs_init_and_alloc_context
+            verbs_init_and_alloc_context -> _verbs_init_and_alloc_context -> 分配并初始化上下文结构。 调用它来创建驱动程序包装器，context_offset 是 verbs_context 开始的包装器结构中的字节数
                 verbs_init_context
                     ibverbs_device_hold
                     verbs_set_ops(context_ex, &verbs_dummy_ops) -> rdma verbs操作 -> 在上下文中设置 -> 如果更改，则必须更改 PRIVATE IBVERBS_PRIVATE_ 符号。 这是驱动程序可以支持的每个操作的联合。 如果向此结构添加新元素，则 verbs_dummy_ops 也必须更新。 保持排序
                         SET_OP -> 设置一系列操作
+                        SET_OP(vctx, advise_mr);
+                        SET_PRIV_OP(ctx, alloc_pd);
                         ...
-                    use_ioctl_write = has_ioctl_write(context)
+                    use_ioctl_write = has_ioctl_write(context) -> verbs：允许通过 ioctl 调用所有命令，使用新的 UVERBS_METHOD_INVOKE_WRITE 接口，所有现有的 write() 命令都可以立即转换为通过 ioctl 执行。 如果设置-DIOCTL_MODE=ioctl，则仅支持IOCTL接口，并且不会调用write。 否则“两者”模式将自动检测内核支持并使用它
+                        DECLARE_COMMAND_BUFFER(cmdb, UVERBS_OBJECT_DEVICE, UVERBS_METHOD_INVOKE_WRITE
+                        fill_attr_const_in(cmdb, UVERBS_ATTR_WRITE_CMD, IB_USER_VERBS_CMD_QUERY_DEVICE
+                        execute_ioctl(ctx, cmdb)
             mlx5_open_debug_file
             mlx5_set_debug_mask
             single_threaded_app
@@ -214,6 +221,7 @@ ibv_open_device -> LATEST_SYMVER_FUNC(ibv_open_device -> verbs_open_device
                 get_num_low_lat_uuars
         mlx5_cmd_get_context
             ibv_cmd_get_context
+                UVERBS_METHOD_GET_CONTEXT
                 ...
                 execute_write_bufs(context, IB_USER_VERBS_CMD_GET_CONTEXT
         mlx5_set_context
@@ -230,6 +238,9 @@ ibv_open_device -> LATEST_SYMVER_FUNC(ibv_open_device -> verbs_open_device
                     execute_cmd_write(context, IB_USER_VERBS_CMD_QUERY_DEVICE -> 转到内核态
             mlx5_set_singleton_nc_uar
     set_lib_ops
+        vctx->create_cq_ex = __lib_ibv_create_cq_ex
+        vctx->query_port = __lib_query_port
+        vctx->ABI_placeholder1 = (void (*)(void))vctx->ibv_create_flow -> 为了保持与使用流控制附加功能的 libibverbs-1.1.8 编译的应用程序的后向/前向二进制兼容性，我们需要设置两个 ABI_placeholder 条目以匹配驱动程序集流条目。 这是因为针对 libibverbs-1.1.8 编译的应用程序使用内联 ibv_create_flow 和 ibv_destroy_flow 函数，它们在占位符位置中查找正确的入口点。 对于针对 libibverbs-1.1.9 及更高版本编译的应用程序，内联函数将在正确的位置查找。 */
     ibv_cmd_alloc_async_fd
 
 
@@ -450,17 +461,13 @@ query_device_ex -> mlx5_query_device_ex
 
 .alloc_context = irdma_ualloc_context
     verbs_init_and_alloc_context
-    verbs_set_ops(&iwvctx->ibv_ctx, &irdma_uctx_ops)
+    verbs_set_ops(&iwvctx->ibv_ctx, &irdma_uctx_ops) -> set ops
     irdma_mmap
         mmap
         ibv_dontfork_range
             ibv_madvise_range(base, size, MADV_DONTFORK)
     irdma_ualloc_pd
-        ibv_cmd_alloc_pd
-
-
-
-
+        ibv_cmd_alloc_pd -> IB_USER_VERBS_CMD_ALLOC_PD -> tokernel
 static const struct verbs_context_ops irdma_uctx_ops = {
     .alloc_mw = irdma_ualloc_mw,
     .alloc_pd = irdma_ualloc_pd,
@@ -513,7 +520,12 @@ poll_cq
                 return cq->active_buf->buf + n * cq->cqe_sz
             VALGRIND_MAKE_MEM_DEFINED -> memory check
             dump_cqe
-        mlx5_parse_cqe -> 多分支函数
+        mlx5_parse_cqe(cq, cqe64, cqe, cur_rsc, cur_srq, wc, cqe_ver, 0) -> 多分支函数
+            opcode = mlx5dv_get_cqe_opcode(cqe64)
+            switch (opcode)
+            mlx5_handle_error_cqe
+                case MLX5_CQE_SYNDROME_TRANSPORT_RETRY_EXC_ERR:
+                    return IBV_WC_RETRY_EXC_ERR
             case MLX5_CQE_REQ
             ...
     update_cons_index
@@ -659,6 +671,7 @@ static inline int ibv_poll_cq -> .poll_cq = irdma_upoll_cq, -> 轮询 CQ 以获�
                     int ret = irdma_uk_cq_poll_cmpl(ukcq, cur_cqe)
                         cqe = IRDMA_GET_CURRENT_CQ_ELEM(cq) -> ( (cq)->cq_base[(((cq)->cq_ring).head)].buf ) -> get cqe from cq_ring head
                         get_64bit_val(cqe, 24, &qword3)
+                        polarity = (__u8)FIELD_GET(IRDMA_CQ_VALID, qword3)
                         return ENONENT -> providers/irdma：删除 enum irdma_status_code ，- 用 Linux 错误代码替换自定义 irdma 状态代码的使用。 - 删除枚举 irdma_status_code 和定义它的头文件。 - 删除某些函数中多余的“ret”变量。 由于 irdma_status_code 被替换为 int，因此不需要两个变量来保存错误代码。 - 删除不再需要的冗余初始化
                         udma_from_device_barrier(); -> 确保检查有效位后读取 CQE 内容 -> asm volatile("lfence" ::: "memory")
                         ...
@@ -744,7 +757,7 @@ enum ibv_wc_status {
 	IBV_WC_REM_INV_REQ_ERR,
 	IBV_WC_REM_ACCESS_ERR,
 	IBV_WC_REM_OP_ERR,
-	IBV_WC_RETRY_EXC_ERR,
+	IBV_WC_RETRY_EXC_ERR, ->  (12) - 传输重试计数器超出：尝试发送此消息时超出本地传输超时重试计数器。 这意味着远端没有发送任何Ack或Nack。 如果在发送第一条消息时发生这种情况，通常意味着连接属性错误或远程端未处于可以响应消息的状态。 如果在发送第一条消息后发生这种情况，通常意味着远程 QP 不再可用。 与 RC QP 相关
 	IBV_WC_RNR_RETRY_EXC_ERR,
 	IBV_WC_LOC_RDD_VIOL_ERR,
 	IBV_WC_REM_INV_RD_REQ_ERR,
@@ -757,4 +770,36 @@ enum ibv_wc_status {
 	IBV_WC_TM_ERR,
 	IBV_WC_TM_RNDV_INCOMPLETE,
 };
+
+
+irdma_ureg_mr
+    cmd.reg_type = IRDMA_MEMREG_TYPE_MEM;
+    ibv_cmd_reg_mr IB_USER_VERBS_CMD_REG_MR -> tokernel
+
+
+key data struct:
+struct ibv_device {
+	struct _ibv_device_ops	_ops;
+	enum ibv_node_type	node_type;
+	enum ibv_transport_type	transport_type;
+	/* Name of underlying kernel IB device, eg "mthca0" */
+	char			name[IBV_SYSFS_NAME_MAX];
+	/* Name of uverbs device, eg "uverbs0" */
+	char			dev_name[IBV_SYSFS_NAME_MAX];
+	/* Path to infiniband_verbs class device in sysfs */
+	char			dev_path[IBV_SYSFS_PATH_MAX];
+	/* Path to infiniband class device in sysfs */
+	char			ibdev_path[IBV_SYSFS_PATH_MAX];
+};
+
+
+
+verbs context, 
+struct verbs_context {
+    int (*query_port)(struct ibv_context *context, uint8_t port_num,
+    ...
+}
+
+
+
 

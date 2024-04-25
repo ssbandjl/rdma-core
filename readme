@@ -36,7 +36,9 @@ const char *ibv_event_type_str(enum ibv_event_type event)
 reg mem:
 struct ibv_mr *ibv_reg_mr
 __ibv_reg_mr
-ibv_reg_mr_iova2 -> 添加一个标志以允许创建宽松排序内存区域。 通过此类 MR 的访问可以通过允许系统对某些访问重新排序来提高性能。 由于宽松排序是一种优化，因此不支持它的驱动程序可以简单地忽略它。 可选的 MR 访问位范围是根据内核匹配部分定义的，其第一个条目将为 IBV_ACCESS_RELAXED_ORDERING。 如果应用程序使用可选范围中的一位，则库会将其屏蔽掉，以防内核不支持“MR 可选模式”。
+enum ib_uverbs_access_flags
+IB_UVERBS_ACCESS_OPTIONAL_RANGE
+ibv_reg_mr_iova2 -> verbs：宽松排序内存区域，添加一个标志以允许创建宽松排序内存区域。 通过此类 MR 的访问可以通过允许系统对某些访问重新排序来提高性能。 由于宽松排序是一种优化，因此不支持它的驱动程序可以简单地忽略它。 可选的 MR 访问位范围是根据内核匹配部分定义的，其第一个条目将为 IBV_ACCESS_RELAXED_ORDERING。 如果应用程序使用可选范围中的一位，则库会将其屏蔽掉，以防内核不支持“MR 可选模式”。
     reg_mr -> mlx5_vfio_reg_mr
     .reg_mr	       = mlx5_reg_mr,
         ...
@@ -307,3 +309,35 @@ cmake参数说明:
    -DENABLE_LTTNG（默认，不支持跟踪）
       启用 LTTng 跟踪。
 
+
+
+
+ibdump
+src/MLNX_OFED_SRC-5.8-3.0.7.0/SOURCES/ibdump-6.0.0/ibdump
+gdb --args ./ibdump -d mlx5_0 -w test.pcap
+
+src/MLNX_OFED_SRC-5.8-3.0.7.0/SOURCES/ibdump-6.0.0/ibdump.c -> main
+struct config_t config
+resources_create
+    ibv_alloc_pd
+    ibv_create_cq
+    res->entry_size = 1024*4
+    tmp = (char*)(((u_int64_t)tmp + 0x1000) & ~0xfff)
+    ibv_reg_mr
+    qp_init_attr.qp_type    = IBV_QPT_RAW_PACKET
+    ibv_create_qp
+fw_version_less_than
+set_sw_sniffer
+    fourth_gen_set_sw_sniffer
+        flow_attr.type = IBV_FLOW_ATTR_SNIFFER;
+        ibv_create_flow(res->qp, &flow_attr) -> .create_flow -> SET_OP2(vctx -> , ibv_create_flow, create_flow) -> mlx5_create_flow
+            get_flow_mcounters
+            ibv_cmd_create_flow
+                ib_spec_to_kern_spec
+                execute_cmd_write_ex_full IB_USER_VERBS_EX_CMD_CREATE_FLOW
+set_pcap_header
+    fwrite(&hdr, sizeof(hdr), 1, fh)
+poll_completion
+    ibv_poll_cq
+
+	
