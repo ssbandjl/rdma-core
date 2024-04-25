@@ -1236,3 +1236,36 @@ bt:
 
 
 
+modprobe rdma_cm rdma_ucm
+
+bashrc
+mount_linux(){
+    mount -t 9p -o trans=virtio host0 /root/project/linux/v5.15/jammy
+    cd /root/project/linux/v5.15/jammy
+}
+linux_root(){
+    cd /root/project/linux/v5.15/jammy
+}
+rdma_root(){
+    cd /root/project/rdma/rdma-core
+}
+vscode(){
+    code . -no-sandbox --user-data-dir='/home/u20/.vscode'
+}
+rxe_add(){
+    rdma link add rxe_enp2s0 type rxe netdev enp2s0
+}
+
+
+
+rdma_client -> main -> run
+    rdma_create_ep
+        rdma_resolve_addr2
+            CMA_INIT_CMD(&cmd, sizeof cmd, RESOLVE_ADDR)
+        or
+        rdma_resolve_addr
+        or
+        rdma_resolve_route
+    rdma_reg_msgs
+    rdma_connect
+
