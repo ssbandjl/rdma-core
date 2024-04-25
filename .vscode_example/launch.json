@@ -1,0 +1,115 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "rdma_op_test_c",
+        "type": "cppdbg",
+        "request": "launch",
+        "program": "${workspaceFolder}/build/bin/rdma_op_test",
+        "args": ["-d", "rocep1s0f1", "192.168.7.5"],
+        "stopAtEntry": false,
+        "cwd": "${workspaceFolder}/build/bin",
+        "environment": [],
+        "externalConsole": false,
+        "MIMode": "gdb",
+        "miDebuggerPath": "/usr/bin/gdb",
+        "setupCommands": [
+            {
+                "description": "Enable pretty-printing for gdb",
+                "text": "-enable-pretty-printing",
+                "ignoreFailures": true
+            },
+            {
+                "description": "Set Disassembly Flavor to Intel",
+                "text": "-gdb-set disassembly-flavor intel",
+                "ignoreFailures": true
+            }
+        ]
+      },
+      {
+      "name": "rc_pingpong_test",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/bin/ibv_rc_pingpong",
+      "args": ["-d", "rocep1s0f1", "-s", "64", "-g", "1", "192.168.6.5"],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/build/bin",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+          {
+              "description": "Enable pretty-printing for gdb",
+              "text": "-enable-pretty-printing",
+              "ignoreFailures": true
+          },
+          {
+              "description": "Set Disassembly Flavor to Intel",
+              "text": "-gdb-set disassembly-flavor intel",
+              "ignoreFailures": true
+          }
+       ]
+      },
+      {
+        "name": "write_lat_test_s",
+        "type": "cppdbg",
+        "request": "launch",
+        "program": "${workspaceFolder}/write_test/tiny_64b_write_lat/output/write_lat_test",
+        "args": ["-d", "mlx5_0","-n", "1", "-m", "1024", "-s", "2", "-x", "3", "-t", "1"],
+        // "args": ["-d", "mlx5_1","-n", "5", "-m", "1024", "-s", "2", "-x", "5"],
+        // "args": ["-d", "mlx5_1","-a", "-m", "1024"],
+        "stopAtEntry": false,
+        "cwd": "${workspaceFolder}/write_test/tiny_64b_write_lat/output",
+        "environment": [
+        //    {"name": "LD_LIBRARY_PATH", "value":"/root/project/rdma/rdma-core/build/lib"}
+        ],
+        "externalConsole": false,
+        "MIMode": "gdb",
+        "miDebuggerPath": "/usr/bin/gdb",
+        "setupCommands": [
+            {
+                "description": "Enable pretty-printing for gdb",
+                "text": "-enable-pretty-printing",
+                "ignoreFailures": true
+            },
+            {
+                "description": "Set Disassembly Flavor to Intel",
+                "text": "-gdb-set disassembly-flavor intel",
+                "ignoreFailures": true
+            }
+        ]
+      },
+      {
+        "name": "rdma_cm_server",
+        "type": "cppdbg",
+        "request": "launch",
+        "program": "${workspaceFolder}/build/bin/rdma_server",
+        "args": [],
+        "stopAtEntry": false,
+        "cwd": "${workspaceFolder}//build/bin",
+        "environment": [
+        //    {"name": "LD_LIBRARY_PATH", "value":"/root/project/rdma/rdma-core/build/lib"}
+        ],
+        "externalConsole": false,
+        "MIMode": "gdb",
+        "miDebuggerPath": "/usr/bin/gdb",
+        "setupCommands": [
+            {
+                "description": "Enable pretty-printing for gdb",
+                "text": "-enable-pretty-printing",
+                "ignoreFailures": true
+            },
+            {
+                "description": "Set Disassembly Flavor to Intel",
+                "text": "-gdb-set disassembly-flavor intel",
+                "ignoreFailures": true
+            }
+        ]
+      },
+    ]
+}
+  
