@@ -179,7 +179,6 @@ irdma_ualloc_pd
 verbs_init_context
     context_ex->priv->use_ioctl_write = has_ioctl_write(context);
 
-verbs_init_and_alloc_context
 
 
 irdma_ualloc_context
@@ -206,7 +205,7 @@ while (ib_wr)
 libibverbs/examples/CMakeLists.txt
 rdma_executable(ibv_rc_pingpong rc_pingpong.c)
 libibverbs/examples/rc_pingpong.c -> main
-ibv_get_device_list
+dev_list = ibv_get_device_list(NULL)
 pp_init_ctx
 pp_post_recv
 ibv_req_notify_cq
@@ -465,14 +464,15 @@ ibv_query_device
 
 发起连接请求
 int rdma_connect(struct rdma_cm_id *id, struct rdma_conn_param *conn_param)
-ucma_valid_param
-CMA_INIT_CMD(&cmd, sizeof cmd, CONNECT)
-cmd = UCMA_CMD_CONNECT -> kernel -> static ssize_t (*ucma_cmd_table[]) -> ucma_connect
-ucma_copy_conn_param_to_kern
-  dst->retry_count = 7;   // 无限次重试
-    dst->rnr_retry_count = 7; // 无限次重试
-ucma_copy_ece_param_to_kern_req
-ret = write(id->channel->fd, &cmd, sizeof cmd)
+    ucma_valid_param
+    CMA_INIT_CMD(&cmd, sizeof cmd, CONNECT) -> ucma_connect
+    cmd = UCMA_CMD_CONNECT -> kernel -> static ssize_t (*ucma_cmd_table[]) -> ucma_connect
+    ucma_copy_conn_param_to_kern
+        dst->retry_count = 7;   // 无限次重试
+            dst->rnr_retry_count = 7; // 无限次重试
+    ucma_copy_ece_param_to_kern_req
+    ret = write(id->channel->fd, &cmd, sizeof cmd)
+    ucma_complete(id)
 
 
 
@@ -547,7 +547,7 @@ ibv_open_device -> LATEST_SYMVER_FUNC(ibv_open_device -> verbs_open_device
     verbs_get_device
         container_of(dev, struct verbs_device, device)
     cmd_fd = open_cdev -> verbs：启用 verbs_open_device() 以在非 sysfs 设备上工作，从 mlx5 开始，启用 verbs_open_device() 通过 VFIO 在非 sysfs 设备上工作。 verbs_sysfs_dev 上的任何其他 API 都应该彻底失败
-    context_ex = verbs_device->ops->alloc_context(device, cmd_fd, private_data) -> mlx5_alloc_context -> verbs：始终分配 verbs_context，现在所有内容都在一棵树中，我们可以修改旧版 init_context 路径，通过在所有提供程序的包装结构中将 ibv_context 交换为 verbs_context 来始终分配 verbs_context。 为了保持提供者差异最小，这个补丁同时做了几件事： - 引入 verbs_init_and_alloc_context() 宏。 这会为每个驱动程序分配、清零并初始化 verbs_context。 值得注意的是，这个新宏在失败时根据需要正确设置 errno。 - 从所有驱动程序、calloc、malloc、memset、cmd_fd 和设备分配中删除样板文件 - 与 verbs_init 方案一起必然出现 verbs_uninit 方案，该方案将 uninit 调用降低到提供者而不是公共代码中。 这使我们能够在 init 错误路径上正确地 uninit。 总之，这遵循我们在内核中看到的相当成功的模式，用于对子系统进行驱动程序初始化。 此外，这会将 ibv_cmd_get_context 更改为接受 verbs_context，因为大多数调用者现在都提供该内容，这使得差异较小。 这使得整个流程更加一致，并且可以让我们消除 init_context 流程
+    context_ex = verbs_device->ops->alloc_context(device, cmd_fd, private_data) -> mlx5_alloc_context -> verbs：始终分配 verbs_context，现在所有内容都在一棵树中，我们可以修改旧版 init_context 路径，通过在所有提供程序的包装结构中将 ibv_context 交换为 verbs_context 来始终分配 verbs_context。 为了保持提供者差异最小，这个补丁同时做了几件事： - 引入 verbs_init_and_alloc_context() 宏。 这会为每个驱动程序分配、清零并初始化 verbs_context。 值得注意的是，这个新宏在失败时根据需要正确设置 errno。 - 从所有驱动程序、calloc、malloc、memset、cmd_fd 和设备分配中删除样板文件 - 与 verbs_init 方案一起必然出现 verbs_uninit 方案，该方案将 uninit 调用降低到提供者而不是公共代码中。 这使我们能够在 init 错误路径上正确地 uninit。 总之，这遵循我们在内核中看到的相当成功的模式，用于对子系统进行驱动程序初始化。 此外，这会将 ibv_cmd_get_context 更改为接受 verbs_context，因为大多数调用者现在都提供该内容，这使得差异较小。 这使得整个流程更加一致，并且可以让我们消除 init_context 流程 -> or irdma_ualloc_context
         mlx5_init_context
             verbs_init_and_alloc_context -> _verbs_init_and_alloc_context -> 分配并初始化上下文结构。 调用它来创建驱动程序包装器，context_offset 是 verbs_context 开始的包装器结构中的字节数
                 verbs_init_context
@@ -571,7 +571,7 @@ ibv_open_device -> LATEST_SYMVER_FUNC(ibv_open_device -> verbs_open_device
             ibv_cmd_get_context
                 UVERBS_METHOD_GET_CONTEXT
                 ...
-                execute_write_bufs(context, IB_USER_VERBS_CMD_GET_CONTEXT
+                execute_write_bufs(context, IB_USER_VERBS_CMD_GET_CONTEXT -> ib_uverbs_get_context
         mlx5_set_context
             adjust_uar_info
             cl_qmap_init
@@ -589,7 +589,7 @@ ibv_open_device -> LATEST_SYMVER_FUNC(ibv_open_device -> verbs_open_device
         vctx->create_cq_ex = __lib_ibv_create_cq_ex
         vctx->query_port = __lib_query_port
         vctx->ABI_placeholder1 = (void (*)(void))vctx->ibv_create_flow -> 为了保持与使用流控制附加功能的 libibverbs-1.1.8 编译的应用程序的后向/前向二进制兼容性，我们需要设置两个 ABI_placeholder 条目以匹配驱动程序集流条目。 这是因为针对 libibverbs-1.1.8 编译的应用程序使用内联 ibv_create_flow 和 ibv_destroy_flow 函数，它们在占位符位置中查找正确的入口点。 对于针对 libibverbs-1.1.9 及更高版本编译的应用程序，内联函数将在正确的位置查找。 */
-    ibv_cmd_alloc_async_fd
+    ibv_cmd_alloc_async_fd -> UVERBS_METHOD_ASYNC_EVENT_ALLOC
 
 
 
@@ -759,8 +759,8 @@ static const struct verbs_context_ops mlx5_ctx_common_ops = {
 
 
 代码路径: rdma-core, libibverbs/device.c
-ibv_get_device_list
-    ibverbs_get_device_list -> verbs: 刷新缓存的 ibv_device 列表 问题 ======== 目前，libibverbs 仅在第一次调用 ibv_get_device_list 时构建缓存的 ibv_device 列表，因此无论硬件是否发生变化，该列表都不会更新。 系统。 解决方案======== 修改 ibv_get_device_list() 的实现，以便连续的调用将以与今天相同的方式重新扫描 sysfs，以便每次创建一个新的 ibv_device 列表。 为此，将缓存的设备列表更改为真正的链表而不是动态数组。 我们如何识别新设备​============================= 根据 /sys/class/infiniband_verbs/ 的时间戳创建来识别同一设备 uverbs%d/ibdev。 我们使用 stat 系统调用获取文件状态，并使用 st_mtime 字段来实现此目的。 当我们重新扫描 sysfs 设备时，我们会检查每个 sysfs 设备是否已经在上次扫描中，如果没有，则分配新的 ibv_device 并将其添加到缓存设备列表中。 本系列的下一个补丁处理设备不再使用的情况。 注意：此补丁根据上面 verbs_device 结构体注释中的要求更改了 IBVERBS_PRIVATE 符号
+LATEST_SYMVER_FUNC(ibv_get_device_list
+    num_devices = ibverbs_get_device_list(&device_list) -> verbs: 刷新缓存的 ibv_device 列表 问题 ======== 目前，libibverbs 仅在第一次调用 ibv_get_device_list 时构建缓存的 ibv_device 列表，因此无论硬件是否发生变化，该列表都不会更新。 系统。 解决方案======== 修改 ibv_get_device_list() 的实现，以便连续的调用将以与今天相同的方式重新扫描 sysfs，以便每次创建一个新的 ibv_device 列表。 为此，将缓存的设备列表更改为真正的链表而不是动态数组。 我们如何识别新设备​============================= 根据 /sys/class/infiniband_verbs/ 的时间戳创建来识别同一设备 uverbs%d/ibdev。 我们使用 stat 系统调用获取文件状态，并使用 st_mtime 字段来实现此目的。 当我们重新扫描 sysfs 设备时，我们会检查每个 sysfs 设备是否已经在上次扫描中，如果没有，则分配新的 ibv_device 并将其添加到缓存设备列表中。 本系列的下一个补丁处理设备不再使用的情况。 注意：此补丁根据上面 verbs_device 结构体注释中的要求更改了 IBVERBS_PRIVATE 符号
         find_sysfs_devs_nl -> verbs：使用 netlink 来发现 uverbs 设备而不是 sysfs，netlink 查询为我们提供了 ibdev idx，它对于设备来说大多是唯一的，并且在设备重命名时充当稳定的 id。 如果在 verbs 用户操作期间重命名设备，这会使 verbs 更加健壮。 此外，netlink 仅返回在进程的网络命名空间中实际可见的设备，从而简化了发现过程
             rdmanl_socket_alloc
                 nl_socket_alloc
@@ -788,6 +788,7 @@ ibv_get_device_list
         check_abi_version
             "class/infiniband_verbs/abi_version"
         try_all_drivers
+			list_for_each_safe(sysfs_list, sysfs_dev, tmp, entry)
             try_drivers
                 match_driver_id -> VERBS_MATCH_SENTINEL -> 动词：提供通用代码以将提供程序与内核设备进行匹配 根据表检查 PCI 设备基本上在每个驱动程序中都是重复的。 遵循内核的模式，并将匹配表附加到 verbs_device_ops 驱动程序入口点，该入口点描述提供程序可以处理的所有内核设备，并使核心代码与该表匹配。 驱动程序获取一个指向与分配函数中匹配的表条目的指针。 此实现基于模式别名，而不是读取 PCI 特定供应商和设备文件。 modalias 让我们支持 ACPI 和 OF 提供程序，并提供了一个简单的路径，使提供程序根据其支持的 modalias 字符串（如内核）进行需求加载
                 try_driver
@@ -809,6 +810,7 @@ query_device_ex -> mlx5_query_device_ex
 
 .alloc_context = irdma_ualloc_context
     verbs_init_and_alloc_context
+	ibv_cmd_get_context(&iwvctx->ibv_ctx,
     verbs_set_ops(&iwvctx->ibv_ctx, &irdma_uctx_ops) -> set ops
     irdma_mmap
         mmap
@@ -966,7 +968,7 @@ ibv_query_port -> __lib_query_port
     get_ops(context)->query_port
 
 
-ibv_get_device_list
+LATEST_SYMVER_FUNC(ibv_get_device_list
     ibverbs_init -> verbs：修改 init 的排序方式，将检查 uverbs ABI 移至从内核加载设备列表之后。 当通过 netlink 加载时，我们可以假设 ABI 是 6，而无需转到 sysfs。 这允许我们使用内核依赖项来初始化库，并且错误（例如缺少内核支持）是从 ibverbs_get_device_list() 而不是 ibverbs_init() 返回的。 如果内核支持 netlink，ibverbs 在启动期间不再读取 /sys/ 路径
         check_env("RDMAV_FORK_SAFE") || check_env("IBV_FORK_SAFE")
         ibv_fork_init -> libibverbs/memory.c
@@ -985,7 +987,7 @@ ibv_get_device_list
             rlim.rlim_cur <= 32768
         verbs_set_log_level -> verbs：添加通用日志记录 API，调试打印机制在调试应用程序故障时非常有用。 此补丁添加了一个通用 API，可供所有提供商使用并替换特定于提供商的对应项。 调试消息通过名为 VERBS_LOG_LEVEL 的环境变量进行控制，其中值指示应启用哪些打印： enum { VERBS_LOG_LEVEL_NONE, VERBS_LOG_ERR, VERBS_LOG_WARN, VERBS_LOG_INFO, VERBS_LOG_DEBUG, }; 例如，要启用警告级别或更高级别的打印，VERBS_LOG_LEVEL 应设置为 2。输出应写入 VERBS_LOG_FILE 环境变量中提供的文件。 当在调试模式下编译库并且未提供文件时，输出应写入 stderr。 对于数据路径流，附加 if 语句的开销很重要，可以使用 verbs_*_datapath() 宏，该宏将在编译库以供发布时编译出来, 参考: https://github.com/ssbandjl/rdma-core/commit/5c3514eb87ca86e817a8b610ada3200bbcdde6f4, 编译开关: Enabling debug prints, 可作为日志实现的一个参考
         verbs_set_log_file
-    ibverbs_get_device_list -> verbs: 刷新缓存的 ibv_device 列表，问题 ======== 目前，libibverbs 仅在第一次调用 ibv_get_device_list 时构建缓存的 ibv_device 列表，因此无论是否有硬件更改，该列表都不会更新 在系统中。 解决方案======== 修改 ibv_get_device_list() 的实现，以便连续的调用将以与今天相同的方式重新扫描 sysfs，以便每次创建一个新的 ibv_device 列表。 为此，将缓存的设备列表更改为真正的链表而不是动态数组。 我们如何识别新设备​============================= 根据 /sys/class/infiniband_verbs/ 的时间戳创建来识别同一设备 uverbs%d/ibdev。 我们使用 stat 系统调用获取文件状态，并使用 st_mtime 字段来实现此目的。 当我们重新扫描 sysfs 设备时，我们会检查每个 sysfs 设备是否已经在上次扫描中，如果没有，则分配新的 ibv_device 并将其添加到缓存设备列表中。 本系列的下一个补丁处理设备不再使用的情况。 注意：此补丁根据上面 verbs_device 结构体注释中的要求更改了 IBVERBS_PRIVATE 符号 -> verbs: 整理 ibverbs_get_device_list ，现在我们有了 ccan 列表，这里的逻辑可以大大简化。 消除令人困惑的used和have_driver值，而只是在我们运行进程时从sysfs列表中删除项目。 这直接保证了发现的 sysfs 项仅处理一次，并使 sysfs 指针的生命周期更加清晰
+    num_devices = ibverbs_get_device_list(&device_list) -> verbs: 刷新缓存的 ibv_device 列表，问题 ======== 目前，libibverbs 仅在第一次调用 ibv_get_device_list 时构建缓存的 ibv_device 列表，因此无论是否有硬件更改，该列表都不会更新 在系统中。 解决方案======== 修改 ibv_get_device_list() 的实现，以便连续的调用将以与今天相同的方式重新扫描 sysfs，以便每次创建一个新的 ibv_device 列表。 为此，将缓存的设备列表更改为真正的链表而不是动态数组。 我们如何识别新设备​============================= 根据 /sys/class/infiniband_verbs/ 的时间戳创建来识别同一设备 uverbs%d/ibdev。 我们使用 stat 系统调用获取文件状态，并使用 st_mtime 字段来实现此目的。 当我们重新扫描 sysfs 设备时，我们会检查每个 sysfs 设备是否已经在上次扫描中，如果没有，则分配新的 ibv_device 并将其添加到缓存设备列表中。 本系列的下一个补丁处理设备不再使用的情况。 注意：此补丁根据上面 verbs_device 结构体注释中的要求更改了 IBVERBS_PRIVATE 符号 -> verbs: 整理 ibverbs_get_device_list ，现在我们有了 ccan 列表，这里的逻辑可以大大简化。 消除令人困惑的used和have_driver值，而只是在我们运行进程时从sysfs列表中删除项目。 这直接保证了发现的 sysfs 项仅处理一次，并使 sysfs 指针的生命周期更加清晰
         find_sysfs_devs_nl(&sysfs_list) -> verbs：使用 netlink 来发现 uverbs 设备而不是 sysfs，netlink 查询为我们提供了 ibdev idx，它对于设备来说大多是唯一的，并且在设备重命名时充当稳定的 id。 如果在 verbs 用户操作期间重命名设备，这会使 verbs 更加健壮。 此外，netlink 仅返回在进程的网络命名空间中实际可见的设备，从而简化了发现过程
             rdmanl_socket_alloc
             rdmanl_get_devices(nl, find_sysfs_devs_nl_cb, tmp_sysfs_dev_list)
@@ -1209,7 +1211,20 @@ examples/rdma_server.c -> main -> run
 	ibv_query_qp
 	rdma_reg_msgs
 	rdma_post_recv
-	rdma_accept
+	rdma_accept(id, NULL) -> librdmacm/rdma_server：添加新的示例服务器应用程序，提供一个简单的服务器应用程序来演示接受来自客户端的连接请求并交换消息所需的最少编码
+        ucma_valid_param(id_priv, conn_param)
+        ucma_modify_qp_rtr -> librdmacm：允许用户指定最大 RDMA 资源，允许用户指示库应选择建立连接时应使用的最大可用 RDMA 读取值。 库根据本地硬件限制和连接请求数据选择最大值
+            qp_attr.qp_state = IBV_QPS_INIT
+            rdma_init_qp_attr(id, &qp_attr, &qp_attr_mask)
+                CMA_INIT_CMD_RESP(&cmd, sizeof cmd, INIT_QP_ATTR, &resp, sizeof resp) -> ucma_init_qp_attr
+            ibv_modify_qp(id->qp, &qp_attr, qp_attr_mask
+            qp_attr.qp_state = IBV_QPS_RTR
+            rdma_init_qp_attr(id, &qp_attr, &qp_attr_mask)
+            rdma_seterrno(ibv_modify_qp(id->qp, &qp_attr, qp_attr_mask))
+        ucma_modify_qp_rts
+        CMA_INIT_CMD(&cmd, sizeof cmd, ACCEPT) -> ucma_accept
+        ucma_complete(id)
+            rdma_get_cm_event(id_priv->id.channel, &id_priv->id.event)
 	rdma_get_recv_comp
 	rdma_post_send
 	rdma_get_send_comp
@@ -1261,11 +1276,14 @@ rxe_add(){
 rdma_client -> main -> run
     rdma_create_ep
         rdma_resolve_addr2
-            CMA_INIT_CMD(&cmd, sizeof cmd, RESOLVE_ADDR)
+            CMA_INIT_CMD(&cmd, sizeof cmd, RESOLVE_ADDR) -> ucma_resolve_addr
         or
         rdma_resolve_addr
         or
         rdma_resolve_route
-    rdma_reg_msgs
-    rdma_connect
+    mr = rdma_reg_msgs(id, recv_msg, 16)
+    send_mr = rdma_reg_msgs(id, send_msg, 16)
+    rdma_post_recv -> rdma_post_recvv(id, context, &sge, 1)
+        rdma_seterrno(ibv_post_recv(id->qp, &wr, &bad)
+    rdma_connect(id, NULL)
 
