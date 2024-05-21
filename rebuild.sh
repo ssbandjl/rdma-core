@@ -1,6 +1,4 @@
 #!/bin/bash
-# apt-get install build-essential cmake gcc libudev-dev libnl-3-dev libnl-route-3-dev ninja-build pkg-config valgrind python3-dev cython3 python3-docutils pandoc -y
-
 set -e
 
 SRCDIR=`dirname $0`
@@ -25,9 +23,9 @@ fi
 cd "$BUILDDIR"
 
 if [ "x$NINJA" == "x" ]; then
-    $CMAKE -DIN_PLACE=1 ${EXTRA_CMAKE_FLAGS:-} ..
+    $CMAKE -DIN_PLACE=1 -DCMAKE_BUILD_TYPE=DEBUG ${EXTRA_CMAKE_FLAGS:-} ..
     make
 else
-    $CMAKE -DIN_PLACE=1 -GNinja ${EXTRA_CMAKE_FLAGS:-} ..
+    $CMAKE -DIN_PLACE=1 -GNinja -DCMAKE_BUILD_TYPE=DEBUG ${EXTRA_CMAKE_FLAGS:-} ..
     $NINJA
 fi
