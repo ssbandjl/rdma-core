@@ -39,10 +39,13 @@ __ibv_reg_mr
 enum ib_uverbs_access_flags
 IB_UVERBS_ACCESS_OPTIONAL_RANGE
 ibv_reg_mr_iova2 -> verbs：宽松排序内存区域，添加一个标志以允许创建宽松排序内存区域。 通过此类 MR 的访问可以通过允许系统对某些访问重新排序来提高性能。 由于宽松排序是一种优化，因此不支持它的驱动程序可以简单地忽略它。 可选的 MR 访问位范围是根据内核匹配部分定义的，其第一个条目将为 IBV_ACCESS_RELAXED_ORDERING。 如果应用程序使用可选范围中的一位，则库会将其屏蔽掉，以防内核不支持“MR 可选模式”。
-    reg_mr -> mlx5_vfio_reg_mr
+    mr = get_ops(pd->context)->reg_mr(pd, addr, length, iova, access)
     .reg_mr	       = mlx5_reg_mr,
         ...
         execute_cmd_write(pd->context, IB_USER_VERBS_CMD_REG_MR, cmd, -> ib_uverbs_reg_mr
+    if(mr)
+    else
+        ibv_dofork_range(addr, length)
 
 
 
@@ -74,39 +77,6 @@ verbs.c
 ibv_post_send
 	qp->context->ops.post_send(qp, wr, bad_wr)
 	.post_send =  xxx
-
-static const struct verbs_context_ops irdma_uctx_ops = {
-	.alloc_mw = irdma_ualloc_mw,
-	.alloc_pd = irdma_ualloc_pd,
-	.attach_mcast = irdma_uattach_mcast,
-	.bind_mw = irdma_ubind_mw,
-	.cq_event = irdma_cq_event,
-	.create_ah = irdma_ucreate_ah,
-	.create_cq = irdma_ucreate_cq,
-	.create_cq_ex = irdma_ucreate_cq_ex,
-	.create_qp = irdma_ucreate_qp,
-	.dealloc_mw = irdma_udealloc_mw,
-	.dealloc_pd = irdma_ufree_pd,
-	.dereg_mr = irdma_udereg_mr,
-	.destroy_ah = irdma_udestroy_ah,
-	.destroy_cq = irdma_udestroy_cq,
-	.destroy_qp = irdma_udestroy_qp,
-	.detach_mcast = irdma_udetach_mcast,
-	.modify_qp = irdma_umodify_qp,
-	.poll_cq = irdma_upoll_cq,
-	.post_recv = irdma_upost_recv,
-	.post_send = irdma_upost_send,
-	.query_device_ex = irdma_uquery_device_ex,
-	.query_port = irdma_uquery_port,
-	.query_qp = irdma_uquery_qp,
-	.reg_dmabuf_mr = irdma_ureg_mr_dmabuf,
-	.reg_mr = irdma_ureg_mr,
-	.rereg_mr = irdma_urereg_mr,
-	.req_notify_cq = irdma_uarm_cq,
-	.resize_cq = irdma_uresize_cq,
-	.free_context = irdma_ufree_context,
-};
-
 
 
 enum ib_uverbs_write_cmds {
@@ -788,14 +758,16 @@ LATEST_SYMVER_FUNC(ibv_get_device_list
         check_abi_version
             "class/infiniband_verbs/abi_version"
         try_all_drivers
+            struct verbs_device *vdev;
 			list_for_each_safe(sysfs_list, sysfs_dev, tmp, entry)
-            try_drivers
-                match_driver_id -> VERBS_MATCH_SENTINEL -> 动词：提供通用代码以将提供程序与内核设备进行匹配 根据表检查 PCI 设备基本上在每个驱动程序中都是重复的。 遵循内核的模式，并将匹配表附加到 verbs_device_ops 驱动程序入口点，该入口点描述提供程序可以处理的所有内核设备，并使核心代码与该表匹配。 驱动程序获取一个指向与分配函数中匹配的表条目的指针。 此实现基于模式别名，而不是读取 PCI 特定供应商和设备文件。 modalias 让我们支持 ACPI 和 OF 提供程序，并提供了一个简单的路径，使提供程序根据其支持的 modalias 字符串（如内核）进行需求加载
-                try_driver
-                    match_device
-                    alloc_device -> mlx5_device_alloc
-                    dev->transport_type = IBV_TRANSPORT_IB -> 传输类型
-                    ...
+                vdev = try_drivers(sysfs_dev)
+                    match_driver_id -> VERBS_MATCH_SENTINEL -> 动词：提供通用代码以将提供程序与内核设备进行匹配 根据表检查 PCI 设备基本上在每个驱动程序中都是重复的。 遵循内核的模式，并将匹配表附加到 verbs_device_ops 驱动程序入口点，该入口点描述提供程序可以处理的所有内核设备，并使核心代码与该表匹配。 驱动程序获取一个指向与分配函数中匹配的表条目的指针。 此实现基于模式别名，而不是读取 PCI 特定供应商和设备文件。 modalias 让我们支持 ACPI 和 OF 提供程序，并提供了一个简单的路径，使提供程序根据其支持的 modalias 字符串（如内核）进行需求加载
+                    try_driver
+                        match_device
+                        alloc_device -> mlx5_device_alloc
+                        dev->transport_type = IBV_TRANSPORT_IB -> 传输类型
+                        ...
+                    list_add(device_list, &vdev->entry);
         load_drivers
             dlhandle = dlopen(so_name, RTLD_NOW)
     ibverbs_device_hold
@@ -814,8 +786,30 @@ query_device_ex -> mlx5_query_device_ex
     verbs_set_ops(&iwvctx->ibv_ctx, &irdma_uctx_ops) -> set ops
     irdma_mmap
         mmap
-        ibv_dontfork_range
-            ibv_madvise_range(base, size, MADV_DONTFORK)
+        ibv_dontfork_range(addr, length)
+            if (mm_root)
+                ibv_madvise_range(base, size, MADV_DONTFORK) -> libibverbs/memory.c
+                    start = (uintptr_t) base & ~(range_page_size - 1)
+                    end   = ((uintptr_t) (base + size + range_page_size - 1) & ~(range_page_size - 1)) - 1
+                    node = get_start_node(start, end, inc)
+                        node = __mm_find_start(start, end)
+                            if (node->start <= start && node->end >= start) -> node->start | start | node->end | end |
+                        if (node->start < start)
+                            node = split_range(node, start)
+                                __mm_add(new_node)
+                                    new->color = IBV_RED
+                                    __mm_add_rebalance(new)
+                                        __mm_rotate_left(parent)
+                                        __mm_rotate_right(gp)
+                                        ...
+                        else
+                            tmp = __mm_prev(node)
+                            node = merge_ranges(node, tmp)
+                                __mm_remove(node)
+                                    free(node)
+                                    __mm_rotate_left
+                                    __mm_rotate_right
+                                    ...
     irdma_ualloc_pd
         ibv_cmd_alloc_pd -> IB_USER_VERBS_CMD_ALLOC_PD -> tokernel
 static const struct verbs_context_ops irdma_uctx_ops = {
@@ -968,17 +962,34 @@ ibv_query_port -> __lib_query_port
     get_ops(context)->query_port
 
 
+struct ibv_mem_node {
+	enum {
+		IBV_RED,
+		IBV_BLACK
+	}			color;
+	struct ibv_mem_node    *parent;
+	struct ibv_mem_node    *left, *right;
+	uintptr_t		start, end;
+	int			refcnt;
+};
+static struct ibv_mem_node *mm_root;
+static int too_late;
+
+
 LATEST_SYMVER_FUNC(ibv_get_device_list
     ibverbs_init -> verbs：修改 init 的排序方式，将检查 uverbs ABI 移至从内核加载设备列表之后。 当通过 netlink 加载时，我们可以假设 ABI 是 6，而无需转到 sysfs。 这允许我们使用内核依赖项来初始化库，并且错误（例如缺少内核支持）是从 ibverbs_get_device_list() 而不是 ibverbs_init() 返回的。 如果内核支持 netlink，ibverbs 在启动期间不再读取 /sys/ 路径
         check_env("RDMAV_FORK_SAFE") || check_env("IBV_FORK_SAFE")
         ibv_fork_init -> libibverbs/memory.c
             getenv("RDMAV_HUGEPAGES_SAFE") -> 允许在多次调用 ibv_fork_init 中使用大页，设置环境变量 RDMAV_HUGEPAGES_SAFE 告诉库检查内核用于内存区域的基础页大小。 如果应用程序直接或通过 libhugetlbfs 等库间接使用大页，则这是必需的。 该变量的检查是在第一次调用 ibv_fork_init 时执行的。 这会导致具有多个底层库的复杂应用程序出现不可预测的行为。 提议的更改将允许支持大页面，而不依赖于 ibv_fork_init 调用顺序
-            if (mm_root)
+            if (mm_root) -> return 0
+            posix_memalign(&tmp, page_size, page_size) -> 函数 posix_memalign() 分配 size 字节并将分配的内存的地址放置在 *memptr 中。 分配的内存地址将是对齐的倍数，它必须是2的幂和sizeof(void *)的倍数。 该地址稍后可以成功传递给 free(3)。 如果 size 为 0，则 *memptr 中的值要么是 NULL，要么是唯一的指针值。 过时的函数 memalign() 分配 size 字节并返回指向已分配内存的指针。 内存地址将是对齐的倍数，它必须是2的幂。 函数aligned_alloc()与memalign()相同，除了尺寸应该是对齐的倍数的附加限制。 过时的函数 valloc() 分配 size 字节并返回指向已分配内存的指针。 内存地址将是页面大小的倍数。 它相当于 memalign(sysconf(_SC_PAGESIZE),size)。 已过时的函数 pvalloc() 与 valloc() 类似，但将分配的大小向上舍入到系统页面大小的下一个倍数。 对于所有这些功能，内存不会归零
             get_page_size
                 "/proc/%d/smaps", pid
                 smaps_page_size
                     KernelPageSize
-            madvise(tmp_aligned, size, MADV_DONTFORK) -> 在 ibv_fork_init() 和 madvise 跟踪中处理大页，当在 libibverbs 中启用 fork 支持时，将为注册为内存区域的每个内存页调用 madvise() 。 传递给 madvise() 的内存范围必须是页对齐的，并且大小必须是页大小的倍数。 libibverbs 使用 sysconf(_SC_PAGESIZE) 找出系统页面大小，并根据此页面大小对传递给 reg_mr() 的所有范围进行舍入。 当 libhugetlbfs 中的内存传递给 reg_mr() 时，这不起作用，因为该内存范围的页面大小可能不同（例如 16MB）。 因此 libibverbs 必须使用巨大的页面大小来计算 madvise 的页面对齐范围。 由于在预加载 libhugetlbfs 时向应用程序“在后台”提供大页面，因此应用程序不知道何时注册大页面或普通页面。 要解决此问题，请检测 libibverbs 中大页面的使用，并根据大页面大小调整传递给 madvise 的内存范围。 通过观察 madvise() 失败来确定给定内存范围的页面大小已被证明是不可靠的。 因此，我们引入 RDMAV_HUGEPAGES_SAFE 环境变量，让用户决定是否应在每次 reg_mr() 调用时检查页面大小。 这要求用户了解正在运行的应用程序是否使用大页面。 我没有添加额外的 API 调用来启用此功能，因为应用程序可以使用 setenv() + ibv_fork_init() 来启用检查代码中的大页面
+            madvise(tmp_aligned, size, MADV_DONTFORK) -> 在 ibv_fork_init() 和 madvise 跟踪中处理大页，当在 libibverbs 中启用 fork 支持时，将为注册为内存区域的每个内存页调用 madvise() 。 传递给 madvise() 的内存范围必须是页对齐的，并且大小必须是页大小的倍数。 libibverbs 使用 sysconf(_SC_PAGESIZE) 找出系统页面大小，并根据此页面大小对传递给 reg_mr() 的所有范围进行舍入。 当 libhugetlbfs 中的内存传递给 reg_mr() 时，这不起作用，因为该内存范围的页面大小可能不同（例如 16MB）。 因此 libibverbs 必须使用巨大的页面大小来计算 madvise 的页面对齐范围。 由于在预加载 libhugetlbfs 时向应用程序“在后台”提供大页面，因此应用程序不知道何时注册大页面或普通页面。 要解决此问题，请检测 libibverbs 中大页面的使用，并根据大页面大小调整传递给 madvise 的内存范围。 通过观察 madvise() 失败来确定给定内存范围的页面大小已被证明是不可靠的。 因此，我们引入 RDMAV_HUGEPAGES_SAFE 环境变量，让用户决定是否应在每次 reg_mr() 调用时检查页面大小。 这要求用户了解正在运行的应用程序是否使用大页面。 我没有添加额外的 API 调用来启用此功能，因为应用程序可以使用 setenv() + ibv_fork_init() 来启用检查代码中的大页面 -> MADV_DONTFORK（自 Linux 2.6.16 起），在 fork(2) 后不要使该范围内的页面可供子进程使用。 如果父级在 fork(2) 之后写入页面，这对于防止写时复制语义更改页面的物理位置很有用。 （此类页面重定位会导致 DMA 进入页面的硬件出现问题。） MADV_DOFORK（自 Linux 2.6.16 起） 撤消 MADV_DONTFORK 的影响，恢复默认行为，从而跨 fork 继承映射(2)
+            mm_root = malloc(sizeof *mm_root)
+            ...
             mm_root->color  = IBV_BLACK -> 初始化红黑树(会影响性能)
             ...
         verbs_allow_disassociate_destroy -> verbs：引入ENV来控制销毁命令时的EIO，引入环境变量（即RDMAV_ALLOW_DISASSOC_DESTROY）来控制销毁命令返回的代码。 一旦设置完毕，任何将从内核获取 EIO 的销毁命令都将被视为成功。 在这种情况下，该对象的底层内核资源必须已通过分离机制销毁，并且用户空间驱动程序和应用程序也可以安全地清理其资源。 这是为了防止用户空间区域的内存泄漏
@@ -1122,10 +1133,14 @@ enum ibv_wc_status {
 };
 
 
-irdma_ureg_mr
+struct ibv_mr *irdma_ureg_mr(struct ibv_pd *pd, void *addr, size_t length, uint64_t hca_va, int access)
+    umr = malloc(sizeof(*umr))
+    cmd.reg_type = IRDMA_MEMREG_TYPE_MEM
     ibv_cmd_reg_mr
-    cmd.reg_type = IRDMA_MEMREG_TYPE_MEM;
-    ibv_cmd_reg_mr IB_USER_VERBS_CMD_REG_MR -> tokernel
+        cmd->start 	  = (uintptr_t) addr
+        cmd->hca_va 	  = hca_va
+        execute_cmd_write(pd->context, IB_USER_VERBS_CMD_REG_MR, cmd, -> to kernel
+    return &umr->vmr.ibv_mr
 
 
 key data struct:
@@ -1286,4 +1301,47 @@ rdma_client -> main -> run
     rdma_post_recv -> rdma_post_recvv(id, context, &sge, 1)
         rdma_seterrno(ibv_post_recv(id->qp, &wr, &bad)
     rdma_connect(id, NULL)
+
+
+
+static const char *def_ca_name = "mthca0";
+umad_get_ca
+    resolve_ca_name(ca_name, NULL, &found_ca_name)
+        resolve_ca_port
+            umad_get_ca
+        umad_get_ca_device_list
+    find_cached_ca(found_ca_name, ca) -> caching not implemented yet
+    get_ca(found_ca_name, ca)
+        snprintf(dir_name, sizeof(dir_name), "%s/%s", SYS_INFINIBAND,
+        sys_read_uint(dir_name, SYS_NODE_TYPE, &ca->node_type)
+        sys_read_string(dir_name, SYS_CA_FW_VERS, ca->fw_ver,
+        sys_read_string(dir_name, SYS_CA_TYPE,
+        sys_read_guid(dir_name, SYS_CA_NODE_GUID, &ca->node_guid)
+        sys_read_guid(dir_name, SYS_CA_SYS_GUID, &ca->system_guid))
+        SYS_CA_PORTS_DIR
+        UMAD_CA_MAX_PORTS
+
+
+
+static int ibv_madvise_range
+    static struct ibv_mem_node *split_range
+        static void __mm_add(struct ibv_mem_node *new)
+            __mm_add_rebalance
+                ...
+                gp->color     = IBV_RED;
+
+
+
+按需分页功能允许注册内存区域而无需固定其页面。 不幸的是，该功能不能与所有传输和所有操作一起工作。 此补丁添加了通过 ibv_query_device_ex 报告按需分页功能的功能。 该补丁还添加了 IBV_ACCESS_ON_DEMAND 访问标志，以允许注册启用按需分页的内存区域
+commit: https://patchwork.kernel.org/project/linux-rdma/patch/1441292199-8371-3-git-send-email-haggaie@mellanox.com/
+
+
+
+enum ibv_rx_hash_fields -> RX 哈希字段可以设置哪个传入数据包的字段应参与 RX 哈希。 每个标志代表某个数据包的字段，当设置该标志时，该标志所代表的字段将参与 RX Hash 计算。 注意： *IPV4 和 *IPV6 标志不能在同一 QP 上同时启用，并且 *TCP 和 *UDP 标志不能在同一 QP 上同时启用
+
+struct ibv_moderate_cq -> verbs：添加对 CQ 审核的支持，此补丁引入了 ibv_modify_cq 动词来启用 CQ 审核，将来可以使用 attr_mask 字段将其扩展为其他选项。 通过使用 ibv_modify_cq 动词，用户可以通过指定导致事件的完成数量以及导致事件的超时（以微秒为单位）来调节完成事件，即使未达到完成数量也是如此。 要禁用审核功能，用户将 cq_count 和 cq_period 重置为 0
+
+
+ibv_inc_rkey -> Increase the 8 lsb in the given rkey
+
 
