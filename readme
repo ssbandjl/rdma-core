@@ -58,6 +58,9 @@ IB_USER_VERBS_CMD_
 intel irdma:
 providers/irdma/umain.c
 irdma_device_alloc
+    struct irdma_udevice *dev
+    dev = calloc(1, sizeof(*dev))
+
 static const struct verbs_device_ops irdma_udev_ops = {
 	.alloc_context = irdma_ualloc_context,
 	.alloc_device = irdma_device_alloc,
@@ -151,12 +154,8 @@ verbs_init_context
 
 
 
-irdma_ualloc_context
 
-.alloc_context = irdma_ualloc_context
 
-ibv_open_device
-verbs_open_device
 
 
 irdma_upost_send
@@ -168,25 +167,6 @@ while (ib_wr)
 	case IBV_WR_RDMA_WRITE
 		irdma_uk_inline_rdma_write or
 		irdma_uk_rdma_write
-
-
-
-
-libibverbs/examples/CMakeLists.txt
-rdma_executable(ibv_rc_pingpong rc_pingpong.c)
-libibverbs/examples/rc_pingpong.c -> main
-dev_list = ibv_get_device_list(NULL)
-pp_init_ctx
-pp_post_recv
-ibv_req_notify_cq
-pp_get_port_info
-pp_client_exch_dest or
-pp_server_exch_dest
-pp_connect_ctx
-ibv_memcpy_to_dm
-pp_post_send
-pp_cq
-ibv_start_poll
 
 
 rdma_executable(ibv_devices device_list.c)
@@ -560,6 +540,10 @@ ibv_open_device -> LATEST_SYMVER_FUNC(ibv_open_device -> verbs_open_device
         vctx->query_port = __lib_query_port
         vctx->ABI_placeholder1 = (void (*)(void))vctx->ibv_create_flow -> 为了保持与使用流控制附加功能的 libibverbs-1.1.8 编译的应用程序的后向/前向二进制兼容性，我们需要设置两个 ABI_placeholder 条目以匹配驱动程序集流条目。 这是因为针对 libibverbs-1.1.8 编译的应用程序使用内联 ibv_create_flow 和 ibv_destroy_flow 函数，它们在占位符位置中查找正确的入口点。 对于针对 libibverbs-1.1.9 及更高版本编译的应用程序，内联函数将在正确的位置查找。 */
     ibv_cmd_alloc_async_fd -> UVERBS_METHOD_ASYNC_EVENT_ALLOC
+        DECLARE_COMMAND_BUFFER(cmdb, UVERBS_OBJECT_ASYNC_EVENT, UVERBS_METHOD_ASYNC_EVENT_ALLOC, 1)
+        UVERBS_ATTR_ASYNC_EVENT_ALLOC_FD_HANDLE
+        execute_ioctl(context, cmdb) -> to kernel
+        context->async_fd = read_attr_fd
 
 
 
@@ -764,7 +748,7 @@ LATEST_SYMVER_FUNC(ibv_get_device_list
                     match_driver_id -> VERBS_MATCH_SENTINEL -> 动词：提供通用代码以将提供程序与内核设备进行匹配 根据表检查 PCI 设备基本上在每个驱动程序中都是重复的。 遵循内核的模式，并将匹配表附加到 verbs_device_ops 驱动程序入口点，该入口点描述提供程序可以处理的所有内核设备，并使核心代码与该表匹配。 驱动程序获取一个指向与分配函数中匹配的表条目的指针。 此实现基于模式别名，而不是读取 PCI 特定供应商和设备文件。 modalias 让我们支持 ACPI 和 OF 提供程序，并提供了一个简单的路径，使提供程序根据其支持的 modalias 字符串（如内核）进行需求加载
                     try_driver
                         match_device
-                        alloc_device -> mlx5_device_alloc
+                        alloc_device -> mlx5_device_alloc | irdma_device_alloc
                         dev->transport_type = IBV_TRANSPORT_IB -> 传输类型
                         ...
                     list_add(device_list, &vdev->entry);
@@ -854,7 +838,7 @@ LATEST_SYMVER_FUNC(ibv_alloc_pd
 
 
 
-poll_cq
+mlx5_poll_cq -> poll_cq
     mlx5_stall_cycles_poll_cq
     or mlx5_stall_poll_cq
     mlx5_poll_one
@@ -871,7 +855,16 @@ poll_cq
                 case MLX5_CQE_SYNDROME_TRANSPORT_RETRY_EXC_ERR:
                     return IBV_WC_RETRY_EXC_ERR
             case MLX5_CQE_REQ
-            ...
+                if (lazy)
+                    case MLX5_OPCODE_RDMA_READ:
+                        goto scatter_out -> 散开/内联相关
+                    if (cqe64->op_own & MLX5_INLINE_SCATTER_32) -> or MLX5_INLINE_SCATTER_64
+                        mlx5_copy_to_send_wqe(mqp, wqe_ctr, cqe, wc_byte_len)
+                            scat = mlx5_get_send_wqe(qp, 0)
+                                qp->sq_start + (n << MLX5_SEND_WQE_SHIFT)
+                            copy_to_scat(scat, buf, &size, max, ctx)
+                                if (likely(scat->lkey != ctx->dump_fill_mkey_be)) -> mlx5：添加对 ibv_alloc_null_mr 的支持，如果支持，mlx5_alloc_null_mr 会分配 MR 并使用 mlx5_context 中的 dump_fill_mkey 设置其 lkey 成员。此 MR 中的 dump_fill_mkey 稍后会在 ibv_post_receive() 和 ibv_post_send() 中用于分别排除使用转储和填充内存键设置的 ibv_sge 的写入和读取
+                                    memcpy((void *)(unsigned long)be64toh(scat->addr), buf, copy)
     update_cons_index
     mlx5_get_cycles
 
@@ -1344,4 +1337,27 @@ struct ibv_moderate_cq -> verbs：添加对 CQ 审核的支持，此补丁引入
 
 ibv_inc_rkey -> Increase the 8 lsb in the given rkey
 
+batch define func: ib_mad_dump_fn mad_dump_int, mad_dump_uint,
+
+
+
+
+
+PROVIDER_DRIVER(irdma, irdma_udev_ops);
+
+ibv_register_driver
+
+
+struct ibv_device_attr_ex
+    ibv_tm_caps
+
+
+ibv_pack_tm_info
+    
+
+
+
+mlx5_copy_to_recv_wqe
+    scat = get_recv_wqe(qp, idx)
+        qp->buf.buf + qp->rq.offset + (n << qp->rq.wqe_shift)
 
