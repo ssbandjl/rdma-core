@@ -662,7 +662,7 @@ struct ibv_mr *mlx5_reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t len
 		return NULL;
 
 	ret = ibv_cmd_reg_dmabuf_mr(pd, offset, length, iova, fd, acc,
-				    &mr->vmr);
+				    &mr->vmr, NULL);
 	if (ret) {
 		free(mr);
 		return NULL;
@@ -961,6 +961,9 @@ static struct ibv_cq_ex *create_cq(struct ibv_context *context,
 				   int cq_alloc_flags,
 				   struct mlx5dv_cq_init_attr *mlx5cq_attr)
 {
+	DECLARE_COMMAND_BUFFER_LINK(driver_attrs, UVERBS_OBJECT_CQ,
+				    UVERBS_METHOD_CQ_CREATE, 1,
+				    NULL);
 	struct mlx5_create_cq_ex	cmd_ex = {};
 	struct mlx5_create_cq_ex_resp	resp_ex = {};
 	struct mlx5_ib_create_cq       *cmd_drv;
@@ -1123,18 +1126,24 @@ static struct ibv_cq_ex *create_cq(struct ibv_context *context,
 		cmd_drv->flags |= MLX5_IB_CREATE_CQ_FLAGS_REAL_TIME_TS;
 
 	if (mctx->nc_uar) {
-		cmd_drv->flags |= MLX5_IB_CREATE_CQ_FLAGS_UAR_PAGE_INDEX;
-		cmd_drv->uar_page_index = mctx->nc_uar->page_id;
+		if (mctx->nc_uar->page_id >= (1ul << 16)) {
+			fill_attr_in_uint32(driver_attrs, MLX5_IB_ATTR_CREATE_CQ_UAR_INDEX,
+					    mctx->nc_uar->page_id);
+		} else {
+			cmd_drv->flags |= MLX5_IB_CREATE_CQ_FLAGS_UAR_PAGE_INDEX;
+			cmd_drv->uar_page_index = mctx->nc_uar->page_id;
+		}
 	}
 
 	{
 		struct ibv_cq_init_attr_ex cq_attr_ex = *cq_attr;
 
 		cq_attr_ex.cqe = ncqe - 1;
-		ret = ibv_cmd_create_cq_ex(context, &cq_attr_ex, &cq->verbs_cq,
-					   &cmd_ex.ibv_cmd, sizeof(cmd_ex),
-					   &resp_ex.ibv_resp, sizeof(resp_ex),
-					   CREATE_CQ_CMD_FLAGS_TS_IGNORED_EX);
+		ret = ibv_cmd_create_cq_ex2(context, &cq_attr_ex, &cq->verbs_cq,
+					    &cmd_ex.ibv_cmd, sizeof(cmd_ex),
+					    &resp_ex.ibv_resp, sizeof(resp_ex),
+					    CREATE_CQ_CMD_FLAGS_TS_IGNORED_EX,
+					    driver_attrs);
 	}
 
 	if (ret) {
@@ -3590,9 +3599,9 @@ struct ibv_srq *mlx5_create_srq_ex(struct ibv_context *context,
 	 */
 	max_sge = ctx->max_recv_wr / sizeof(struct mlx5_wqe_data_seg);
 	if (attr->attr.max_sge > max_sge) {
-		mlx5_err(ctx->dbg_fp, "%s-%d:max_wr %d, max_srq_recv_wr %d\n",
-			 __func__, __LINE__, attr->attr.max_wr,
-			 ctx->max_srq_recv_wr);
+		mlx5_err(ctx->dbg_fp, "%s-%d:attr.max_sge %d, max_sge %d\n",
+			 __func__, __LINE__, attr->attr.max_sge,
+			 max_sge);
 		errno = EINVAL;
 		goto err;
 	}
@@ -4881,6 +4890,72 @@ void *mlx5dv_dm_map_op_addr(struct ibv_dm *dm, uint8_t op)
 	}
 
 	return dvops->dm_map_op_addr(dm, op);
+}
+
+static struct ibv_mr *
+_mlx5dv_reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset,
+		      size_t length, uint64_t iova, int fd,
+		      int access, int mlx5_access)
+{
+	DECLARE_COMMAND_BUFFER_LINK(driver_attr, UVERBS_OBJECT_MR,
+				    UVERBS_METHOD_REG_DMABUF_MR, 1,
+				    NULL);
+	struct mlx5_mr *mr;
+	int ret;
+
+	mr = calloc(1, sizeof(*mr));
+	if (!mr)
+		return NULL;
+
+	fill_attr_in_uint32(driver_attr, MLX5_IB_ATTR_REG_DMABUF_MR_ACCESS_FLAGS, mlx5_access);
+	ret = ibv_cmd_reg_dmabuf_mr(pd, offset, length, iova, fd, access,
+				    &mr->vmr, driver_attr);
+	if (ret) {
+		free(mr);
+		return NULL;
+	}
+	mr->alloc_flags = access;
+
+	return &mr->vmr.ibv_mr;
+}
+
+struct ibv_mr *mlx5dv_reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset,
+				    size_t length, uint64_t iova, int fd,
+				    int access, int mlx5_access)
+{
+	struct mlx5_dv_context_ops *dvops = mlx5_get_dv_ops(pd->context);
+
+	if (!dvops || !dvops->reg_dmabuf_mr) {
+		errno = EOPNOTSUPP;
+		return NULL;
+	}
+
+	return dvops->reg_dmabuf_mr(pd, offset, length, iova, fd,
+				    access, mlx5_access);
+}
+
+static int _mlx5dv_get_data_direct_sysfs_path(struct ibv_context *context, char *buf,
+					      size_t buf_len)
+{
+	DECLARE_COMMAND_BUFFER(cmd,
+			       UVERBS_OBJECT_DEVICE,
+			       MLX5_IB_METHOD_GET_DATA_DIRECT_SYSFS_PATH,
+			       1);
+
+	fill_attr_out(cmd, MLX5_IB_ATTR_GET_DATA_DIRECT_SYSFS_PATH, buf, buf_len);
+
+	return execute_ioctl(context, cmd);
+}
+
+int mlx5dv_get_data_direct_sysfs_path(struct ibv_context *context, char *buf,
+				      size_t buf_len)
+{
+	struct mlx5_dv_context_ops *dvops = mlx5_get_dv_ops(context);
+
+	if (!dvops || !dvops->get_data_direct_sysfs_path)
+		return EOPNOTSUPP;
+
+	return dvops->get_data_direct_sysfs_path(context, buf, buf_len);
 }
 
 void mlx5_unimport_dm(struct ibv_dm *ibdm)
@@ -7879,4 +7954,7 @@ void mlx5_set_dv_ctx_ops(struct mlx5_dv_context_ops *ops)
 
 	ops->create_steering_anchor = _mlx5dv_create_steering_anchor;
 	ops->destroy_steering_anchor = _mlx5dv_destroy_steering_anchor;
+
+	ops->reg_dmabuf_mr = _mlx5dv_reg_dmabuf_mr;
+	ops->get_data_direct_sysfs_path = _mlx5dv_get_data_direct_sysfs_path;
 }

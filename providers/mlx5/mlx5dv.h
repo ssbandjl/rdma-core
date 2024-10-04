@@ -919,6 +919,12 @@ struct ibv_dm *mlx5dv_alloc_dm(struct ibv_context *context,
 
 void *mlx5dv_dm_map_op_addr(struct ibv_dm *dm, uint8_t op);
 
+struct ibv_mr *mlx5dv_reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset,
+				    size_t length, uint64_t iova, int fd,
+				    int access, int mlx5_access);
+int mlx5dv_get_data_direct_sysfs_path(struct ibv_context *context, char *buf,
+				      size_t buf_len);
+
 struct mlx5_wqe_av;
 
 struct mlx5dv_ah {
@@ -929,6 +935,10 @@ struct mlx5dv_ah {
 struct mlx5dv_pd {
 	uint32_t		pdn;
 	uint64_t		comp_mask;
+};
+
+struct mlx5dv_devx {
+	uint32_t handle;
 };
 
 struct mlx5dv_obj {
@@ -960,6 +970,10 @@ struct mlx5dv_obj {
 		struct ibv_pd		*in;
 		struct mlx5dv_pd	*out;
 	} pd;
+	struct {
+		struct mlx5dv_devx_obj *in;
+		struct mlx5dv_devx *out;
+	} devx;
 };
 
 enum mlx5dv_obj_type {
@@ -970,6 +984,7 @@ enum mlx5dv_obj_type {
 	MLX5DV_OBJ_DM	= 1 << 4,
 	MLX5DV_OBJ_AH	= 1 << 5,
 	MLX5DV_OBJ_PD	= 1 << 6,
+	MLX5DV_OBJ_DEVX	= 1 << 7,
 };
 
 enum mlx5dv_wq_init_attr_mask {
@@ -1011,8 +1026,8 @@ struct ibv_wq *mlx5dv_create_wq(struct ibv_context *context,
 				struct mlx5dv_wq_init_attr *mlx5_wq_attr);
 /*
  * This function will initialize mlx5dv_xxx structs based on supplied type.
- * The information for initialization is taken from ibv_xx structs supplied
- * as part of input.
+ * The information for initialization is taken from either ibv_xx or
+ * mlx5dv_xxx structs supplied as part of input.
  *
  * Request information of CQ marks its owned by DV for all consumer index
  * related actions.
@@ -1279,7 +1294,7 @@ struct mlx5_wqe_av {
 	uint8_t		fl_mlid;
 	__be16		rlid;
 	uint8_t		reserved0[4];
-	uint8_t		rmac[6];
+	uint8_t		rmac[ETHERNET_LL_SIZE];
 	uint8_t		tclass;
 	uint8_t		hop_limit;
 	__be32		grh_gid_fl;
@@ -1526,7 +1541,7 @@ void mlx5dv_set_dgram_seg(struct mlx5_wqe_datagram_seg *seg,
 	seg->av.stat_rate_sl	= stat_rate_sl;
 	seg->av.fl_mlid		= fl_mlid;
 	seg->av.rlid		= htobe16(rlid);
-	memcpy(seg->av.rmac, rmac, 6);
+	memcpy(seg->av.rmac, rmac, ETHERNET_LL_SIZE);
 	seg->av.tclass		= tclass;
 	seg->av.hop_limit	= hop_limit;
 	seg->av.grh_gid_fl	= htobe32(grh_gid_fi);
