@@ -28,6 +28,7 @@ class DeviceTest(PyverbsAPITestCase):
 
     def get_device_list(self):
         lst = d.get_device_list()
+        print(f"dev_list:{lst}")
         if len(lst) == 0:
             raise unittest.SkipTest('No IB device found')
         dev_name = self.config['dev']

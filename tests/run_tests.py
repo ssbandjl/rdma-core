@@ -9,6 +9,7 @@ from importlib.machinery import SourceFileLoader
 
 
 module_path = os.path.join(os.path.dirname(__file__), '__init__.py')
+print(f"module_path: {module_path}")
 tests = SourceFileLoader('tests', module_path).load_module()
 parser.parse_args()
 unittest.main(module=tests)
