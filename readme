@@ -647,6 +647,11 @@ static const struct verbs_context_ops mlx5_ctx_common_ops = {
     .req_notify_cq = mlx5_arm_cq,
     .cq_event      = mlx5_cq_event,
     .resize_cq     = mlx5_resize_cq,
+        cqe = align_queue_size(cqe + 1)
+        mlx5_alloc_cq_buf(mctx, cq, cq->resize_buf, cq->resize_cqes, cq->resize_cqe_sz)
+        ibv_cmd_resize_cq(ibcq, cqe - 1, &cmd.ibv_cmd, sizeof(cmd)
+        mlx5_cq_resize_copy_cqes(mctx, cq)
+        cq->verbs_cq.cq.cqe = cqe - 1
     .destroy_cq    = mlx5_destroy_cq,
     .create_srq    = mlx5_create_srq,
     .modify_srq    = mlx5_modify_srq,
@@ -825,8 +830,25 @@ static const struct verbs_context_ops irdma_uctx_ops = {
     .rereg_mr = irdma_urereg_mr,
     .req_notify_cq = irdma_uarm_cq,
     .resize_cq = irdma_uresize_cq,
+        cqe_needed = IRDMA_U_MINCQ_SIZE -> 4
+        cq_size = get_cq_total_bytes(cqe_needed)
+            return roundup(cq_size * sizeof(struct irdma_cqe), IRDMA_HW_PAGE_SIZE) -> 4096
+        cq_pages = cq_size >> IRDMA_HW_PAGE_SHIFT -> 12
+        cq_base = irdma_calloc_hw_buf(cq_size)
+        reg_mr_cmd.reg_type = IRDMA_MEMREG_TYPE_CQ
+        ret = ibv_cmd_resize_cq(&iwucq->verbs_cq.cq, cqe_needed, &cmd.ibv_cmd,
+        irdma_uk_cq_resize(&iwucq->cq, cq_base, cqe_needed)
+            q->cq_base = cq_base
+            cq->cq_size = cq_size
+            IRDMA_RING_INIT(cq->cq_ring, cq->cq_size)
+            cq->polarity = 1
+        list_add_tail(&iwucq->resize_list, &cq_buf->list)
     .free_context = irdma_ufree_context,
 };
+
+
+intel 常用常量/定义等:
+providers/irdma/defs.h
 
 
 LATEST_SYMVER_FUNC(ibv_alloc_pd
@@ -1360,4 +1382,42 @@ ibv_pack_tm_info
 mlx5_copy_to_recv_wqe
     scat = get_recv_wqe(qp, idx)
         qp->buf.buf + qp->rq.offset + (n << qp->rq.wqe_shift)
+
+
+
+
+resize cq:
+test_resize_cq
+    class CQTest(RDMATestCase)
+        self.create_players(CQUDResources, cq_depth=3)
+        new_cq_size = 1 -> resize 3 to 1
+        self.client.cq.resize(new_cq_size) -> def resize(self, cqe)
+            v.ibv_resize_cq(self.cq, cqe) -> get_ops(cq->context)->resize_cq(cq, cqe)
+        self.assertTrue(self.client.cq.cqe >= new_cq_size,
+        irdma.skip_if_irdma_dev(d.Context(name=self.dev_name)) -> 测试：跳过 irdma 设备的 CQ 缩减(resize_cq),  test_resize_cq 假设当缩减具有未轮询条目的活动 CQ 时，它会因 EINVAL 错误而失败，但 irdma 硬件以不同的方式实现调整 CQ 的大小，并允许在不丢失未轮询条目的情况下缩减 CQ。为避免 irdma 设备的 test_resize_cq 失败，请跳过测试用例
+        send_wr, _ = u.get_send_elements(self.client, False) -> def get_send_elements(agr_obj, is_server, opcode=e.IBV_WR_SEND)
+            send_wr = SendWR(opcode=opcode, num_sge=1, sg=[sge])
+        ah_client = u.get_global_ah(self.client, self.gid_index, self.ib_port)
+            AH(agr_obj.pd, attr=ah_attr)
+        for i in range(self.client.cq.cqe - 1)
+            u.send(self.client, send_wr, ah=ah_client) -> def send(agr_obj, send_object, send_op=None, new_send=False, qp_idx=0, ah=None, is_imm=False,
+                post_send(agr_obj, send_object, qp_idx, ah, is_imm)
+                    agr_obj.qps[qp_idx].post_send(send_wr, None) -> def post_send(self, SendWR wr not None, SendWR bad_wr=None)
+                        rc = v.ibv_post_send(self.qp, &wr.send_wr, &my_bad_wr)
+
+cdef class SendWR(PyverbsCM):
+    opcode=e.IBV_WR_SEND
+    super().__init__()
+    copy_sg_array(dst, sg, num_sge)
+    self.send_wr.num_sge = num_sge
+    self.send_wr.wr_id = wr_id
+    self.send_wr.opcode = opcode
+
+
+
+
+odp:
+test_odp_rc_rdma_write
+    self.create_players(OdpRC, request_user_addr=self.force_page_faults, odp_caps=e.IBV_ODP_SUPPORT_WRITE)
+    u.rdma_traffic(**self.traffic_args, send_op=e.IBV_WR_RDMA_WRITE)
 
