@@ -1589,3 +1589,11 @@ rxe:
 
 
 
+
+srq:
+tests.test_srq.SrqTestCase.test_modify_srq_limit
+tests.test_srq.SrqTestCase.test_rc_srq_traffic
+tests.test_srq.SrqTestCase.test_resize_srq
+tests.test_parent_domain.ParentDomainTrafficTest.test_mem_align_srq_excq_rc_traffic
+
+create_srq:
