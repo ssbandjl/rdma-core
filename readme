@@ -647,10 +647,16 @@ static const struct verbs_context_ops mlx5_ctx_common_ops = {
     .req_notify_cq = mlx5_arm_cq,
     .cq_event      = mlx5_cq_event,
     .resize_cq     = mlx5_resize_cq,
+        if (((long long)cqe * 64) > INT_MAX)
+            return EINVAL
         cqe = align_queue_size(cqe + 1)
+        cq->resize_cqes = cqe
         mlx5_alloc_cq_buf(mctx, cq, cq->resize_buf, cq->resize_cqes, cq->resize_cqe_sz)
+            mlx5_get_alloc_type(mctx, cq->parent_domain, MLX5_CQ_PREFIX, &type, default_type)
+            mlx5_alloc_prefered_buf(mctx, buf, align(nent * cqe_sz, dev->page_size), dev->page_size, type, MLX5_CQ_PREFIX)
         ibv_cmd_resize_cq(ibcq, cqe - 1, &cmd.ibv_cmd, sizeof(cmd)
         mlx5_cq_resize_copy_cqes(mctx, cq)
+            memcpy(dcqe, scqe, ssize)
         cq->verbs_cq.cq.cqe = cqe - 1
     .destroy_cq    = mlx5_destroy_cq,
     .create_srq    = mlx5_create_srq,
@@ -829,19 +835,33 @@ static const struct verbs_context_ops irdma_uctx_ops = {
     .reg_mr = irdma_ureg_mr,
     .rereg_mr = irdma_urereg_mr,
     .req_notify_cq = irdma_uarm_cq,
-    .resize_cq = irdma_uresize_cq,
+    .resize_cq = irdma_uresize_cq, -> int irdma_uresize_cq(struct ibv_cq *cq, int cqe)
+        cqe_needed = cqe + 1
         cqe_needed = IRDMA_U_MINCQ_SIZE -> 4
         cq_size = get_cq_total_bytes(cqe_needed)
             return roundup(cq_size * sizeof(struct irdma_cqe), IRDMA_HW_PAGE_SIZE) -> 4096
         cq_pages = cq_size >> IRDMA_HW_PAGE_SHIFT -> 12
         cq_base = irdma_calloc_hw_buf(cq_size)
+            irdma_calloc_hw_buf_sz(size, IRDMA_HW_PAGE_SIZE)
+                buf = memalign(alignment, size)
+                ibv_dontfork_range(buf, size)
+                memset(buf, 0, size)
         reg_mr_cmd.reg_type = IRDMA_MEMREG_TYPE_CQ
+        ret = ibv_cmd_reg_mr(new_mr.ibv_mr.pd, cq_base, cq_size,
+			     (uintptr_t)cq_base, IBV_ACCESS_LOCAL_WRITE,
+			     &new_mr, &reg_mr_cmd.ibv_cmd, sizeof(reg_mr_cmd),
+			     &reg_mr_resp, sizeof(reg_mr_resp))
+        cmd.user_cq_buffer = (__u64)((uintptr_t)cq_base)
         ret = ibv_cmd_resize_cq(&iwucq->verbs_cq.cq, cqe_needed, &cmd.ibv_cmd,
+            execute_cmd_write(cq->context, IB_USER_VERBS_CMD_RESIZE_CQ, cmd, cmd_size, resp, resp_size)
+        cq_buf->vmr = iwucq->vmr
+        iwucq->vmr = new_mr
         irdma_uk_cq_resize(&iwucq->cq, cq_base, cqe_needed)
             q->cq_base = cq_base
             cq->cq_size = cq_size
             IRDMA_RING_INIT(cq->cq_ring, cq->cq_size)
             cq->polarity = 1
+        iwucq->verbs_cq.cq.cqe = cqe
         list_add_tail(&iwucq->resize_list, &cq_buf->list)
     .free_context = irdma_ufree_context,
 };
@@ -878,15 +898,22 @@ mlx5_poll_cq -> poll_cq
                     return IBV_WC_RETRY_EXC_ERR
             case MLX5_CQE_REQ
                 if (lazy)
+                    uint32_t wc_byte_len
                     case MLX5_OPCODE_RDMA_READ:
+                        wc_byte_len = be32toh(cqe64->byte_cnt)
                         goto scatter_out -> 散开/内联相关
-                    if (cqe64->op_own & MLX5_INLINE_SCATTER_32) -> or MLX5_INLINE_SCATTER_64
+                    or wc_byte_len = 8
+                    if (cqe64->op_own & MLX5_INLINE_SCATTER_32)
                         mlx5_copy_to_send_wqe(mqp, wqe_ctr, cqe, wc_byte_len)
+                            ctrl = mlx5_get_send_wqe(qp, idx)
+                                qp->sq_start + (n << MLX5_SEND_WQE_SHIFT)
                             scat = mlx5_get_send_wqe(qp, 0)
                                 qp->sq_start + (n << MLX5_SEND_WQE_SHIFT)
                             copy_to_scat(scat, buf, &size, max, ctx)
                                 if (likely(scat->lkey != ctx->dump_fill_mkey_be)) -> mlx5：添加对 ibv_alloc_null_mr 的支持，如果支持，mlx5_alloc_null_mr 会分配 MR 并使用 mlx5_context 中的 dump_fill_mkey 设置其 lkey 成员。此 MR 中的 dump_fill_mkey 稍后会在 ibv_post_receive() 和 ibv_post_send() 中用于分别排除使用转储和填充内存键设置的 ibv_sge 的写入和读取
                                     memcpy((void *)(unsigned long)be64toh(scat->addr), buf, copy)
+                    else MLX5_INLINE_SCATTER_64
+                        err = mlx5_copy_to_send_wqe(mqp, wqe_ctr, cqe - 1, wc_byte_len)
     update_cons_index
     mlx5_get_cycles
 
@@ -1074,15 +1101,20 @@ static inline int ibv_poll_cq -> .poll_cq = irdma_upoll_cq, -> 轮询 CQ 以获�
                                 entry->opcode = IBV_WC_RDMA_WRITE; -> set wc opcode
                         or
                         set_ib_wc_op_rq(cur_cqe, entry,
+                if (cq_new_cqe)
+                    last_buf = cq_buf
+        // check the current CQ for new cqes
         while (npolled < num_entries)
             irdma_poll_one
-        irdma_process_resize_list
+        irdma_process_resize_list -> process the cq list to remove buffers
             list_for_each_safe(&iwucq->resize_list, cq_buf, next, list)
                 list_del(&cq_buf->list)
                 irdma_free_cq_buf(cq_buf
-        irdma_uk_cq_set_resized_cnt
-            sw_cq_sel += cq_cnt;
-            set_64bit_val(cq->shadow_area, 32, temp_val)
+                cq_cnt++
+        if (resized_bufs)
+            irdma_uk_cq_set_resized_cnt
+                sw_cq_sel += cq_cnt;
+                set_64bit_val(cq->shadow_area, 32, temp_val)
 
 soft roce:
 rxe
@@ -1414,10 +1446,146 @@ cdef class SendWR(PyverbsCM):
     self.send_wr.opcode = opcode
 
 
-
+rxe resize_cq:
+.resize_cq = rxe_resize_cq,
+    ret = ibv_cmd_resize_cq(ibcq, cqe, &cmd, sizeof(cmd), &resp.ibv_resp, sizeof(resp))
+    munmap(cq->queue, cq->mmap_info.size)
+    cq->queue = mmap(NULL, resp.mi.size, PROT_READ | PROT_WRITE, MAP_SHARED, ibcq->context->cmd_fd, resp.mi.offset)
+    cq->mmap_info = resp.mi
 
 odp:
 test_odp_rc_rdma_write
     self.create_players(OdpRC, request_user_addr=self.force_page_faults, odp_caps=e.IBV_ODP_SUPPORT_WRITE)
     u.rdma_traffic(**self.traffic_args, send_op=e.IBV_WR_RDMA_WRITE)
+
+
+参考:
+用户态发送工作请求: https://www.cnblogs.com/vlhn/p/7997457.html
+ibv_post_send
+static const struct verbs_context_ops mlx5_ctx_common_ops
+.post_send     = mlx5_post_send,
+    post_send_db
+mlx5_post_send
+    
+
+
+LATEST_SYMVER_FUNC(ibv_get_device_guid, 1_1, "IBVERBS_1.1",
+    verbs_get_device
+    ibv_read_ibdev_sysfs_file node_guid
+        ibv_read_sysfs_file
+    sysfs_dev->node_guid = guid
+    return htobe64(guid)
+
+
+
+
+inline to cqe:
+static struct ibv_qp *create_qp
+    if (use_scatter_to_cqe())
+            env = getenv("MLX5_SCATTER_TO_CQE")
+        mlx5_create_flags |= MLX5_QP_FLAG_SCATTER_CQE -> mlx5：支持通过 DCT QP 向 CQE 散射 向 CQE 散射是一项性能功能，从未在 DCT QP 上启用过。查询设备相关动词中报告了一项新功能，该功能允许在 DCT QP 上启用该功能。相应地，此补丁启用了该功能，以便它与其他 QP 和手册页保持一致。它将由旧环境变量控制，并可以通过 DV 创建标志覆盖
+
+
+
+测试内联到CQE(scatter2cqe):
+def test_scatter_to_cqe_control_by_qp(self)
+    self.set_env_variable('MLX5_SCATTER_TO_CQE', s2c_env_val)
+    self.create_players(Mlx5DvCqDcRes, create_flags=qp_s2c_value)
+    u.traffic(**self.traffic_args, new_send=True, send_op=e.IBV_WR_SEND, is_cq_ex=True)
+
+
+
+create_dct
+    MLX5_VENDOR_CAP_FLAGS_SCAT2CQE_DCT
+    mlx5_create_flags &= ~MLX5_QP_FLAG_SCATTER_CQE
+
+
+
+mlx5_query_device_ex
+    if (resp.flags & MLX5_IB_QUERY_DEV_RESP_FLAGS_SCAT2CQE_DCT)
+        mctx->vendor_cap_flags |= MLX5_VENDOR_CAP_FLAGS_SCAT2CQE_DCT
+
+
+
+共享接收队列:
+ibv_post_srq_recv
+    srq->context->ops.post_srq_recv(srq, recv_wr, bad_recv_wr)
+
+ref:
+.post_srq_recv = rxe_post_srq_recv,
+    while (recv_wr)
+        rxe_post_one_recv(&srq->rq, recv_wr)
+            if (queue_full(q))
+                    prod = atomic_load_explicit(producer(q), memory_order_relaxed)
+                    cons = atomic_load_explicit(consumer(q), memory_order_acquire)
+                    return (cons == ((prod + 1) & q->index_mask))
+            wqe = (struct rxe_recv_wqe *)producer_addr(q)
+                prod = atomic_load_explicit(producer(q), memory_order_relaxed)
+                return q->data + (prod << q->log2_elem_size)
+            memcpy(wqe->dma.sge, recv_wr->sg_list, num_sge*sizeof(*wqe->dma.sge))
+            advance_producer(q)
+                atomic_store_explicit(producer(q), prod, memory_order_release)
+
+
+
+.post_srq_recv = mlx5_post_srq_recv,
+    for (nreq = 0; wr; ++nreq, wr = wr->next)
+        if (srq->head == srq->tail)
+            if (bitmap_test_bit(srq->free_wqe_bitmap, next_tail))
+                set_next_tail(srq, next_tail)
+        srq->wrid[srq->head] = wr->wr_id
+        udma_to_device_barrier()
+        *srq->db = htobe32(srq->counter)
+
+
+.post_srq_recv = hns_roce_u_v2_post_srq_recv,
+    for (nreq = 0; wr; ++nreq, wr = wr->next) 
+        ret = get_wqe_idx(srq, &wqe_idx)
+        wqe = get_srq_wqe(srq, wqe_idx)
+        srq->wrid[wqe_idx] = wr->wr_id
+    udma_to_device_barrier()
+    if (srq->cap_flags & HNS_ROCE_RSP_SRQ_CAP_RECORD_DB)
+        *srq->rdb = srq->idx_que.head & 0xffff
+    else
+        update_srq_db(ctx, &srq_db, srq)
+            hr_reg_write(db, DB_TAG, srq->srqn)
+            hr_reg_write(db, DB_CMD, HNS_ROCE_V2_SRQ_DB)
+            hr_reg_write(db, DB_PI, srq->idx_que.head)
+            hns_roce_write64(ctx->uar + ROCEE_VF_DB_CFG0_OFFSET, (__le32 *)db)
+                mmio_write64_le(dest, *(__le64 *)val)
+
+
+
+CQ中断模式:
+ibv_req_notify_cq(pp_cq(ctx), 0) -> 请求 CQ 上的完成通知。当条目添加到 CQ 时，将向与 CQ 关联的完成通道添加事件。@cq：请求通知的完成队列。@solicited_only：如果非零，则仅为下一个请求的 CQ 条目生成事件。如果为零，则任何 CQ 条目（无论是否请求）都将生成事件
+    cq->context->ops.req_notify_cq(cq, solicited_only)
+
+
+.req_notify_cq = mlx5_arm_cq,
+    cmd = solicited ? MLX5_CQ_DB_REQ_NOT_SOL : MLX5_CQ_DB_REQ_NOT
+    cq->dbrec[MLX5_CQ_ARM_DB] = htobe32(sn << 28 | cmd | ci)
+    mmio_wc_start()
+    mmio_write64_be(ctx->cq_uar_reg + MLX5_CQ_DOORBELL, htobe64(doorbell))
+    mmio_flush_writes()
+
+
+.req_notify_cq = irdma_uarm_cq,
+    irdma_arm_cq(iwucq, cq_notify)
+    iwucq->is_armed = true;
+    iwucq->arm_sol = true;
+    iwucq->skip_arm = false;
+    iwucq->skip_sol = true;
+    irdma_uk_cq_request_notification(&iwucq->cq, cq_notify)
+        db_wr32(cq->cq_id, cq->cqe_alloc_db)
+
+
+rxe:
+.req_notify_cq = ibv_cmd_req_notify_cq,
+    execute_cmd_write_req(ibcq->context, IB_USER_VERBS_CMD_REQ_NOTIFY_CQ, &req, sizeof(req))
+
+
+.req_notify_cq = hns_roce_u_v2_arm_cq,
+    hns_roce_write64(ctx->uar + ROCEE_VF_DB_CFG0_OFFSET, (__le32 *)&cq_db)
+
+
 
