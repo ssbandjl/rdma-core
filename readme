@@ -1,6 +1,10 @@
 原路径: https://github.com/linux-rdma/rdma-core.git
 GIT仓库: https://github.com/ssbandjl/rdma-core.git
 
+git remote add upstream https://github.com/linux-rdma/rdma-core.git
+git fetch upstream
+git merge upstream/master
+
 intel rdma ref: https://blog.csdn.net/bandaoyu/article/details/116203690
 
 
@@ -637,15 +641,31 @@ static const struct verbs_context_ops mlx5_ctx_common_ops = {
     .dealloc_pd    = mlx5_free_pd,
     .reg_mr	       = mlx5_reg_mr,
     .reg_dmabuf_mr = mlx5_reg_dmabuf_mr,
+        mr = calloc(1, sizeof(*mr))
+        ret = ibv_cmd_reg_dmabuf_mr(pd, offset, length, iova, fd, acc, &mr->vmr, NULL)
     .rereg_mr      = mlx5_rereg_mr,
     .dereg_mr      = mlx5_dereg_mr,
     .alloc_mw      = mlx5_alloc_mw,
     .dealloc_mw    = mlx5_dealloc_mw,
     .bind_mw       = mlx5_bind_mw,
     .create_cq     = mlx5_create_cq,
+    create_cq
+        cq =  calloc(1, sizeof *cq)
+        cmd_drv->db_addr  = (uintptr_t) cq->dbrec
     .poll_cq       = mlx5_poll_cq,
     .req_notify_cq = mlx5_arm_cq,
+        sn  = cq->arm_sn & 3
+        ci  = cq->cons_index & 0xffffff
+        cmd = solicited ? MLX5_CQ_DB_REQ_NOT_SOL : MLX5_CQ_DB_REQ_NOT
+        doorbell = sn << 28 | cmd | ci
+        doorbell <<= 32;
+        doorbell |= cq->cqn
+        cq->dbrec[MLX5_CQ_ARM_DB] = htobe32(sn << 28 | cmd | ci)
+        mmio_wc_start()
+        mmio_write64_be(ctx->cq_uar_reg + MLX5_CQ_DOORBELL, htobe64(doorbell))
+        mmio_flush_writes()
     .cq_event      = mlx5_cq_event,
+        to_mcq(cq)->arm_sn++
     .resize_cq     = mlx5_resize_cq,
         if (((long long)cqe * 64) > INT_MAX)
             return EINVAL
@@ -669,6 +689,10 @@ static const struct verbs_context_ops mlx5_ctx_common_ops = {
     .modify_qp     = mlx5_modify_qp,
     .destroy_qp    = mlx5_destroy_qp,
     .post_send     = mlx5_post_send,
+        _mlx5_post_send
+            post_send_db(qp, bf, nreq, inl, size, ctrl)
+                qp->db[MLX5_SND_DBR] = htobe32(qp->sq.cur_post & 0xffff)
+                mmio_write64_be(bf->reg + bf->offset, *(__be64 *)ctrl)
     .post_recv     = mlx5_post_recv,
     .create_ah     = mlx5_create_ah,
     .destroy_ah    = mlx5_destroy_ah,
@@ -813,6 +837,10 @@ static const struct verbs_context_ops irdma_uctx_ops = {
     .attach_mcast = irdma_uattach_mcast,
     .bind_mw = irdma_ubind_mw,
     .cq_event = irdma_cq_event,
+        if (iwucq->skip_arm)
+            irdma_arm_cq(iwucq, IRDMA_CQ_COMPL_EVENT)
+        else
+            iwucq->is_armed = false
     .create_ah = irdma_ucreate_ah,
     .create_cq = irdma_ucreate_cq,
     .create_cq_ex = irdma_ucreate_cq_ex,
@@ -832,6 +860,13 @@ static const struct verbs_context_ops irdma_uctx_ops = {
     .query_port = irdma_uquery_port,
     .query_qp = irdma_uquery_qp,
     .reg_dmabuf_mr = irdma_ureg_mr_dmabuf,
+        umr = calloc(1, sizeof(*umr))
+        err = ibv_cmd_reg_dmabuf_mr(pd, offset, length, iova, fd, access, &umr->vmr, NULL)
+            DECLARE_COMMAND_BUFFER_LINK(cmdb, UVERBS_OBJECT_MR, UVERBS_METHOD_REG_DMABUF_MR, 9, driver) -> IOCTL to Kernel -> static int UVERBS_HANDLER(UVERBS_METHOD_REG_DMABUF_MR)
+                _ioctl_final_num_attrs
+                struct ibv_command_buffer
+                    struct ib_uverbs_ioctl_hdr hdr
+        return &umr->vmr.ibv_mr
     .reg_mr = irdma_ureg_mr,
     .rereg_mr = irdma_urereg_mr,
     .req_notify_cq = irdma_uarm_cq,
@@ -915,8 +950,21 @@ mlx5_poll_cq -> poll_cq
                     else MLX5_INLINE_SCATTER_64
                         err = mlx5_copy_to_send_wqe(mqp, wqe_ctr, cqe - 1, wc_byte_len)
     update_cons_index
+        cq->dbrec[MLX5_CQ_SET_CI] = htobe32(cq->cons_index & 0xffffff)
     mlx5_get_cycles
 
+
+RDMA用完成事件通道读取 CQE 的方式如下：
+用户程序通过调用 ibv_create_comp_channel 创建完成事件通道；
+接着在调用 ibv_create_cq 创建CQ时关联该完成事件通道；
+再通过调用 ibv_req_notify_cq 来告诉CQ当有新的CQE产生时从完成事件通道来通知用户程序；
+然后通过调用 ibv_get_cq_event 查询该完成事件通道，没有新的CQE时阻塞，有新的CQE时返回；
+接下来用户程序从 ibv_get_cq_event 返回之后，还要再调用 ibv_poll_cq 从CQ里读取新的CQE，此时调用 ibv_poll_cq 一次就好，不需要轮询。必须定期轮询 CQ 以防止溢出。 如果发生溢出，CQ 将被关闭并发送一个异步事件 IBV_EVENT_CQ_ERR
+
+如果某人不对使用ibv_get_cq_event()读取的所有完成事件进行确认，则销毁获取事件的 CQ 将被永久阻塞。此行为用于防止对已被销毁的资源进行确认操作
+ibv_ack_cq_events
+    cq->comp_events_completed += nevents
+    pthread_cond_signal(&cq->cond) -> pthread_cond_wait(&cq->cond, &cq->mutex)
 
 
 test:
@@ -927,7 +975,12 @@ ibv_get_device_list
 pp_init_ctx
     ctx->buf = memalign(page_size, size)
     ibv_open_device
-    ibv_create_comp_channel
+    if (use_event)
+        ctx->channel = ibv_create_comp_channel(ctx->context)
+            execute_cmd_write(context, IB_USER_VERBS_CMD_CREATE_COMP_CHANNEL -> DECLARE_CMD(IB_USER_VERBS_CMD_CREATE_COMP_CHANNEL, ibv_create_comp_channel, ib_uverbs_create_comp_channel);
+            channel->fd      = resp.fd
+    else
+        ctx->channel = NULL
     ctx->pd = ibv_alloc_pd(ctx->context)
     if (use_odp || use_ts || use_dm)
         ibv_query_device_ex(ctx->context, NULL, &attrx) -> 查询设备属性/支持的功能
@@ -948,7 +1001,8 @@ pp_init_ctx
 pp_post_recv
     for (i = 0; i < n; ++i)
         ibv_post_recv
-ibv_req_notify_cq
+ibv_req_notify_cq(pp_cq(ctx), 0) -> solicited_only：如果非零，则仅为下一个请求的 CQ 条目生成事件。如果为零，则任何 CQ 条目（无论是否请求）都将生成事件。
+    cq->context->ops.req_notify_cq(cq, solicited_only)
 pp_get_port_info -> 由于 IBoE 需要使用 GRH，因此更新 ibv_*_pinpong 示例以接受 GID。 GID 作为本地端口表的索引给出，并通过套接字连接在客户端和服务器之间交换
     ibv_query_port
 ibv_query_gid
@@ -981,6 +1035,12 @@ pp_connect_ctx
         ibv_wr_complete
         or ibv_post_send
 ibv_get_cq_event
+    struct ib_uverbs_comp_event_desc ev
+    if (read(channel->fd, &ev, sizeof ev) != sizeof ev)
+    *cq         = (struct ibv_cq *) (uintptr_t) ev.cq_handle;
+    *cq_context = (*cq)->cq_context;
+    get_ops((*cq)->context)->cq_event(*cq);
+
 if (use_ts) -> RoCE 时间戳允许您在将数据包发送到线路或从线路接收数据包时对其进行标记。 时间戳以原始硬件周期给出，但可以轻松转换为硬件参考的基于纳秒的时间。 此外，它使您能够查询硬件的硬件时间，从而标记其他应用程序的事件并比较时间
     ibv_start_poll
 parse_single_wc
@@ -1070,7 +1130,7 @@ static inline int ibv_poll_cq -> .poll_cq = irdma_upoll_cq, -> 轮询 CQ 以获�
     ret = __irdma_upoll_cq(iwucq, num_entries, entry)
         list_for_each_safe(&iwucq->resize_list, cq_buf, next, list) -> 浏览之前调整大小的 CQ 缓冲区列表
             while (npolled < num_entries)
-                ret = irdma_poll_one(&cq_buf->cq, cur_cqe, entry ? entry + npolled : NULL); -> ret 0 = success
+                ret = irdma_poll_one(&cq_buf->cq, cur_cqe, entry ? entry + npolled : NULL); -> ret 0 = success -> 对于非扩展 CQ，将填充 ibv_wc 对象；对于扩展 CQ，将填充 NULL
                     int ret = irdma_uk_cq_poll_cmpl(ukcq, cur_cqe)
                         cqe = IRDMA_GET_CURRENT_CQ_ELEM(cq) -> ( (cq)->cq_base[(((cq)->cq_ring).head)].buf ) -> get cqe from cq_ring head
                         get_64bit_val(cqe, 24, &qword3)
@@ -1091,6 +1151,9 @@ static inline int ibv_poll_cq -> .poll_cq = irdma_upoll_cq, -> 轮询 CQ 以获�
                         else { /* q_type is IRDMA_CQE_QTYPE_SQ */
                             if (qp->first_sq_wq)
                                 irdma_uk_cq_poll_cmpl -> recu
+                        IRDMA_RING_MOVE_HEAD_NOCHECK(cq->cq_ring) -> move head
+                        IRDMA_RING_MOVE_TAIL(cq->cq_ring) -> move tail
+                        set_64bit_val(cq->shadow_area, 0, IRDMA_RING_CURRENT_HEAD(cq->cq_ring))
                     irdma_process_cqe_ext
                     or
                     irdma_process_cqe
@@ -1597,3 +1660,147 @@ tests.test_srq.SrqTestCase.test_resize_srq
 tests.test_parent_domain.ParentDomainTrafficTest.test_mem_align_srq_excq_rc_traffic
 
 create_srq:
+        
+
+mlx5dv_dr_domain_create
+    dr_domain_init_resources
+        dr_send_ring_alloc
+            dr_send_ring_alloc_one
+
+
+
+mlx5dv_devx_alloc_uar
+    bf = mlx5_attach_dedicated_uar(context, flags)
+    fill_attr_in_uint32(cmd, MLX5_IB_ATTR_DEVX_QUERY_UAR_USER_IDX, bf->bfreg_dyn_index)
+    fill_attr_out_ptr(cmd, MLX5_IB_ATTR_DEVX_QUERY_UAR_DEV_IDX, &bf->devx_uar.dv_devx_uar.page_id)
+    execute_ioctl(context, cmd)
+    
+
+
+uk:
+user/kernel shared libraries
+
+
+
+e810
+ibv_create_cq:
+ucreate_cq
+	if (attr_ex->cqe < IRDMA_MIN_CQ_SIZE || attr_ex->cqe > uk_attrs->max_hw_cq_size - 1)
+	info.cq_size = get_cq_size(attr_ex->cqe, hw_rev)
+	total_size = get_cq_total_bytes(info.cq_size)
+		roundup(cq_size * sizeof(struct irdma_cqe), IRDMA_HW_PAGE_SIZE)
+	iwucq->buf_size = total_size
+	info.cq_base = irdma_calloc_hw_buf(total_size)
+        irdma_calloc_hw_buf_sz(size, IRDMA_HW_PAGE_SIZE)
+            buf = memalign(alignment, size) -> normal mem
+            ibv_dontfork_range(buf, size)
+            memset(buf, 0, size)
+	reg_mr_cmd.reg_type = IRDMA_MEMREG_TYPE_CQ
+    reg_mr_cmd.cq_pages = cq_pages
+    ibv_cmd_reg_mr(&iwvctx->iwupd->ibv_pd, info.cq_base,
+			     total_size, (uintptr_t)info.cq_base,
+			     IBV_ACCESS_LOCAL_WRITE, &iwucq->vmr,
+			     &reg_mr_cmd.ibv_cmd, sizeof(reg_mr_cmd),
+			     &reg_mr_resp, sizeof(reg_mr_resp))
+	info.shadow_area = (__le64 *)((__u8 *)info.cq_base + (cq_pages << IRDMA_HW_PAGE_SHIFT))
+	cmd.user_cq_buf = (__u64)((uintptr_t)info.cq_base)
+	cmd.user_shadow_area = (__u64)((uintptr_t)info.shadow_area)
+	ret = ibv_cmd_create_cq_ex(context, attr_ex, &iwucq->verbs_cq,
+				   &cmd.ibv_cmd, sizeof(cmd), &resp.ibv_resp,
+				   sizeof(resp), 0);
+	attr_ex->cqe = ncqe
+	irdma_ibvcq_ex_fill_priv_funcs(iwucq, attr_ex)?
+	info.cq_id = resp.cq_id
+	iwucq->verbs_cq.cq.cqe = ncqe
+	info.cqe_alloc_db = (__u32 *)((__u8 *)iwvctx->db + IRDMA_DB_CQ_OFFSET)
+	irdma_uk_cq_init(&iwucq->cq, &info)
+        cq->cq_base = info->cq_base
+        cq->cq_size = info->cq_size
+        cq->shadow_area = info->shadow_area
+        IRDMA_RING_INIT(cq->cq_ring, cq->cq_size);
+            { (cq->cq_ring).head = 0; (cq->cq_ring).tail = 0; (cq->cq_ring).size = (cq->cq_size); }
+        cq->polarity = 1;
+
+
+
+struct ibv_resize_cq { 
+    struct ib_uverbs_cmd_hdr hdr; 
+    union { 
+        _STRUCT_ib_uverbs_resize_cq; 
+        struct ib_uverbs_resize_cq core_payload; 
+    }; 
+}; 
+typedef struct ibv_resize_cq _ABI_REQ_STRUCT_IB_USER_VERBS_CMD_RESIZE_CQ; 
+typedef struct ib_uverbs_resize_cq _KABI_REQ_STRUCT_IB_USER_VERBS_CMD_RESIZE_CQ; 
+typedef struct ib_uverbs_resize_cq_resp _KABI_RESP_STRUCT_IB_USER_VERBS_CMD_RESIZE_CQ; 
+enum { 
+    _ABI_ALIGN_IB_USER_VERBS_CMD_RESIZE_CQ = 4 
+ }; 
+static_assert(sizeof(struct ib_uverbs_resize_cq_resp) % 4 == 0, "Bad resp alignment"); 
+static_assert(IB_USER_VERBS_CMD_RESIZE_CQ != -1, "Bad enum"); 
+static_assert(sizeof(struct ibv_resize_cq) == sizeof(struct ib_uverbs_cmd_hdr) + sizeof(struct ib_uverbs_resize_cq), "Bad size")
+
+
+
+gdr:
+
+libfabric dmabuf, commit:https://github.com/ssbandjl/libfabric/commit/bc6258069f2e9975a69257e921708a980399626a
+fabtests\component\dmabuf-rdma\rdmabw-xe.c
+dmabuf_reg_open
+xe_init
+    EXIT_ON_ERROR(init_libze_ops())
+        libze_handle = dlopen("libze_loader.so.1", RTLD_NOW)
+        libze_ops.zeInit = dlsym(libze_handle, "zeInit")
+        ...
+    libze_ops.zeInit
+    libze_ops.zeContextCreate
+    init_gpu(num_gpus, dev_num, subdev_num)
+init_buf
+init_ib
+    ibv_get_device_list
+    init_nic
+        ibv_open_device
+        ibv_alloc_pd
+        for (i = 0; i < num_gpus; i++)
+            reg_mr(pd, bufs[i].xe_buf.buf,
+				       bufs[i].xe_buf.size,
+				       bufs[i].xe_buf.base,
+				       bufs[i].xe_buf.location)
+                int odp_flag = use_odp ? IBV_ACCESS_ON_DEMAND : 0
+                if (where == MALLOC || use_dmabuf_reg)
+                    ibv_reg_mr(pd, buf, size, mr_access_flags | odp_flag)
+                else
+                    ibv_reg_dmabuf_mr(pd, (uint64_t)((char *)buf - (char *)base), size, (uint64_t)buf, /* iova */ xe_get_buf_fd(buf), mr_access_flags) -> to RDMA-CORE
+        ibv_create_cq
+        qp_init_attr.qp_type = IBV_QPT_RC;
+        ibv_create_qp
+        ibv_modify_qp
+        ibv_query_gid
+    show_business_card(&me, "Me");
+    exchange_info
+    show_business_card(&peer, "Peer");
+    connect_ib
+        qp_attr.qp_state		= IBV_QPS_RTR;
+        ...
+        ibv_modify_qp
+        qp_attr.qp_state = IBV_QPS_RTS;
+        ibv_modify_qp
+run_rdma_test
+    post_proxy_write
+        .opcode = IBV_WR_RDMA_WRITE,
+    or post_rdma
+        .opcode = test_type == READ ? IBV_WR_RDMA_READ : IBV_WR_RDMA_WRITE
+    ibv_poll_cq
+    check_completions
+        ibv_wc_status_str
+sync_tcp
+sync_ib
+
+
+ibv_reg_dmabuf_mr
+    mr = get_ops(pd->context)->reg_dmabuf_mr(pd, offset, length, iova, fd, access)
+    verbs_context_ops callback: .reg_dmabuf_mr
+    mr->addr = (void *)(uintptr_t)offset
+    mr->length = length
+
+
