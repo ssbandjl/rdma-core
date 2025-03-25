@@ -1148,6 +1148,11 @@ struct ibv_sge {
 	uint32_t		lkey;
 };
 
+struct ibv_fd_arr {
+	int *arr;
+	uint32_t count;
+};
+
 struct ibv_send_wr {
 	uint64_t		wr_id;
 	struct ibv_send_wr     *next;
@@ -2215,7 +2220,7 @@ static inline struct verbs_context *verbs_get_ctx(struct ibv_context *ctx)
 		return NULL;
 
 	/* open code container_of to not pollute the global namespace */
-	return (struct verbs_context *)(((uint8_t *)ctx) -
+	return (struct verbs_context *)(((uintptr_t)ctx) -
 					offsetof(struct verbs_context,
 						 context));
 }

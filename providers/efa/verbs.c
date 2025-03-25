@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-2-Clause
 /*
- * Copyright 2019-2024 Amazon.com, Inc. or its affiliates. All rights reserved.
+ * Copyright 2019-2025 Amazon.com, Inc. or its affiliates. All rights reserved.
  */
 
 #include <assert.h>
@@ -964,13 +964,13 @@ static struct ibv_cq_ex *create_cq(struct ibv_context *ibvctx,
 	}
 
 	if (resp.comp_mask & EFA_CREATE_CQ_RESP_DB_OFF) {
-		cq->db = mmap(NULL,
-			      to_efa_dev(ibvctx->device)->pg_sz, PROT_WRITE,
-			      MAP_SHARED, ibvctx->cmd_fd, resp.db_mmap_key);
-		if (cq->db == MAP_FAILED)
+		cq->db_mmap_addr = mmap(NULL,
+					to_efa_dev(ibvctx->device)->pg_sz, PROT_WRITE,
+					MAP_SHARED, ibvctx->cmd_fd, resp.db_mmap_key);
+		if (cq->db_mmap_addr == MAP_FAILED)
 			goto err_unmap_cq;
 
-		cq->db = (uint32_t *)((uint8_t *)cq->db + resp.db_off);
+		cq->db = (uint32_t *)(cq->db_mmap_addr + resp.db_off);
 	}
 
 	efa_cq_fill_pfns(cq, attr, efa_attr);
@@ -1065,7 +1065,7 @@ int efa_destroy_cq(struct ibv_cq *ibvcq)
 		return err;
 	}
 
-	munmap(cq->db, to_efa_dev(cq->dev)->pg_sz);
+	munmap(cq->db_mmap_addr, to_efa_dev(cq->dev)->pg_sz);
 	munmap(cq->buf, cq->buf_size);
 
 	pthread_spin_destroy(&cq->lock);
@@ -2451,7 +2451,7 @@ int efa_post_recv(struct ibv_qp *ibvqp, struct ibv_recv_wr *wr,
 			addr = wr->sg_list[i].addr;
 
 			/* Set RX buffer desc from SGE */
-			rx_buf.length = wr->sg_list[i].length;
+			rx_buf.length = min_t(uint32_t, wr->sg_list[i].length, UINT16_MAX);
 			EFA_SET(&rx_buf.lkey_ctrl, EFA_IO_RX_DESC_LKEY,
 				wr->sg_list[i].lkey);
 			rx_buf.buf_addr_lo = addr;

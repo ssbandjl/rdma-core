@@ -119,6 +119,8 @@ static const struct verbs_context_ops bnxt_re_cntx_ops = {
 	.create_ah     = bnxt_re_create_ah,
 	.destroy_ah    = bnxt_re_destroy_ah,
 	.free_context  = bnxt_re_free_context,
+
+	.create_qp_ex  = bnxt_re_create_qp_ex,
 };
 
 static inline bool bnxt_re_is_chip_gen_p7(struct bnxt_re_chip_ctx *cctx)
@@ -196,7 +198,7 @@ static struct verbs_context *bnxt_re_alloc_context(struct ibv_device *vdev,
 	req.comp_mask |= BNXT_RE_COMP_MASK_REQ_UCNTX_POW2_SUPPORT;
 	req.comp_mask |= BNXT_RE_COMP_MASK_REQ_UCNTX_VAR_WQE_SUPPORT;
 	if (ibv_cmd_get_context(&cntx->ibvctx, &req.ibv_cmd, sizeof(req),
-				&resp.ibv_resp, sizeof(resp)))
+				NULL, &resp.ibv_resp, sizeof(resp)))
 		goto failed;
 
 	cntx->dev_id = resp.dev_id;
