@@ -1,0 +1,85 @@
+xb@bin1:~/project/rdma/rdma-core$ git pull upstream master
+From https://github.com/linux-rdma/rdma-core
+ * branch              master     -> FETCH_HEAD
+Merge made by the 'ort' strategy.
+ CMakeLists.txt                                             |   2 +-
+ buildlib/azure-pipelines-release.yml                       |   7 ++++++-
+ buildlib/azure-pipelines.yml                               |   8 ++++----
+ buildlib/cbuild                                            |   8 ++++----
+ debian/changelog                                           |   2 +-
+ infiniband-diags/man/CMakeLists.txt                        |   4 ++--
+ infiniband-diags/man/common/{opt_d.rst => opt_debug.rst}   |   0
+ infiniband-diags/man/common/{opt_v.rst => opt_verbose.rst} |   0
+ infiniband-diags/man/dump_fts.8.in.rst                     |   4 ++--
+ infiniband-diags/man/ibaddr.8.in.rst                       |   4 ++--
+ infiniband-diags/man/ibccconfig.8.in.rst                   |   4 ++--
+ infiniband-diags/man/ibccquery.8.in.rst                    |   4 ++--
+ infiniband-diags/man/iblinkinfo.8.in.rst                   |   2 +-
+ infiniband-diags/man/ibnetdiscover.8.in.rst                |   4 ++--
+ infiniband-diags/man/ibping.8.in.rst                       |   4 ++--
+ infiniband-diags/man/ibportstate.8.in.rst                  |   4 ++--
+ infiniband-diags/man/ibqueryerrors.8.in.rst                |   4 ++--
+ infiniband-diags/man/ibroute.8.in.rst                      |   4 ++--
+ infiniband-diags/man/ibstat.8.in.rst                       |   4 ++--
+ infiniband-diags/man/ibsysstat.8.in.rst                    |   4 ++--
+ infiniband-diags/man/ibtracert.8.in.rst                    |   4 ++--
+ infiniband-diags/man/infiniband-diags.8.in.rst             |   4 ++--
+ infiniband-diags/man/perfquery.8.in.rst                    |   4 ++--
+ infiniband-diags/man/saquery.8.in.rst                      |   4 ++--
+ infiniband-diags/man/sminfo.8.in.rst                       |   4 ++--
+ infiniband-diags/man/smpdump.8.in.rst                      |   4 ++--
+ infiniband-diags/man/smpquery.8.in.rst                     |   4 ++--
+ infiniband-diags/man/vendstat.8.in.rst                     |   4 ++--
+ kernel-headers/rdma/efa-abi.h                              |   3 ++-
+ kernel-headers/rdma/mlx5-abi.h                             |   5 +++++
+ kernel-headers/rdma/rdma_netlink.h                         |  16 ++++++++++++++++
+ libibnetdisc/ibnetdisc_cache.c                             |   2 +-
+ libibverbs/verbs.h                                         |   6 +++---
+ librdmacm/examples/cmtime.c                                |   2 +-
+ providers/bnxt_re/verbs.c                                  |   4 +++-
+ providers/efa/efadv.h                                      |   3 ++-
+ providers/efa/man/efadv_create_qp_ex.3.md                  |   6 +++++-
+ providers/efa/verbs.c                                      |   2 ++
+ providers/hns/hns_roce_u_hw_v2.c                           |  14 +++++++-------
+ providers/mlx5/cq.c                                        |  23 ++++++++++++++++-------
+ providers/mlx5/dr_vports.c                                 |   3 ++-
+ providers/mlx5/man/mlx5dv_create_qp.3.md                   |  64 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ providers/mlx5/man/mlx5dv_query_device.3                   |  14 ++++++++++++++
+ providers/mlx5/man/mlx5dv_wr_mkey_configure.3.md           |  10 +++++-----
+ providers/mlx5/mlx5.c                                      |   7 +++++++
+ providers/mlx5/mlx5.h                                      |   3 +++
+ providers/mlx5/mlx5_ifc.h                                  |   7 ++++++-
+ providers/mlx5/mlx5_vfio.c                                 |   2 +-
+ providers/mlx5/mlx5_vfio.h                                 |   2 +-
+ providers/mlx5/mlx5dv.h                                    |  11 +++++++++++
+ providers/mlx5/verbs.c                                     | 142 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++----------
+ providers/rxe/rxe.c                                        |   6 ++++--
+ pyverbs/device.pyx                                         |   2 +-
+ pyverbs/providers/efa/efadv.pyx                            |   8 ++++++++
+ pyverbs/providers/efa/libefa.pxd                           |   3 ++-
+ pyverbs/providers/mlx5/CMakeLists.txt                      |   1 +
+ pyverbs/providers/mlx5/libmlx5.pxd                         |  11 +++++++++++
+ pyverbs/providers/mlx5/mlx5_enums.pxd                      |   4 ++++
+ pyverbs/providers/mlx5/mlx5_enums.pyx                      |   2 ++
+ pyverbs/providers/mlx5/mlx5dv.pyx                          |  25 +++++++++++++++++++++----
+ pyverbs/providers/mlx5/mlx5dv_dmabuf.pxd                   |   9 +++++++++
+ pyverbs/providers/mlx5/mlx5dv_dmabuf.pyx                   |  33 +++++++++++++++++++++++++++++++++
+ pyverbs/srq.pyx                                            |   2 +-
+ redhat/rdma-core.spec                                      |   2 +-
+ suse/rdma-core.spec                                        |   2 +-
+ tests/CMakeLists.txt                                       |   2 ++
+ tests/test_cq.py                                           |  12 ++++++++----
+ tests/test_mlx5_dmabuf.py                                  | 135 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_mlx5_ooo_qp.py                                  | 131 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_mr.py                                           |  24 +++++++++++++++++++++++-
+ tests/utils.py                                             |  63 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----
+ util/udma_barrier.h                                        |   4 ++--
+ 72 files changed, 823 insertions(+), 118 deletions(-)
+ rename infiniband-diags/man/common/{opt_d.rst => opt_debug.rst} (100%)
+ rename infiniband-diags/man/common/{opt_v.rst => opt_verbose.rst} (100%)
+ create mode 100644 pyverbs/providers/mlx5/mlx5dv_dmabuf.pxd
+ create mode 100644 pyverbs/providers/mlx5/mlx5dv_dmabuf.pyx
+ create mode 100644 tests/test_mlx5_dmabuf.py
+ create mode 100644 tests/test_mlx5_ooo_qp.py
+
+ 
