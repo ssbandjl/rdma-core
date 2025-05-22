@@ -1172,7 +1172,8 @@ int mlx5_post_send(struct ibv_qp *ibqp, struct ibv_send_wr *wr,
 			return EINVAL;
 	}
 #endif
-
+	
+	printf_ffl("MLX5 Post WR\n");
 	return _mlx5_post_send(ibqp, wr, bad_wr);
 }
 

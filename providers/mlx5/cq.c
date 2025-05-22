@@ -1048,6 +1048,9 @@ static inline int poll_cq(struct ibv_cq *ibcq, int ne,
 		}
 	}
 
+	if (npolled > 0)
+		printf_ffl("Poll %d cqe success\n", npolled);
+		
 	return err == CQ_POLL_ERR ? err : npolled;
 }
 
