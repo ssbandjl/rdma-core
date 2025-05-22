@@ -2617,6 +2617,7 @@ static struct verbs_context *mlx5_alloc_context(struct ibv_device *ibdev,
 	struct ibv_fd_arr               *fds = NULL;
 	int ret;
 
+    printf_ffl("MLX5 Alloc context\n");
 	context = mlx5_init_context(ibdev, cmd_fd);
 	if (!context)
 		return NULL;
