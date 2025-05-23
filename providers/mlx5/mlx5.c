@@ -2610,7 +2610,7 @@ static void dump_stack(void) {
     void *buffer[100];
     int nptrs = backtrace(buffer, 100);
 
-    fprintf(stderr, "Stack trace (depth: %d):\n", nptrs);
+    fprintf(stderr, "Verbs Stack trace (depth: %d):\n", nptrs);
     backtrace_symbols_fd(buffer, nptrs, STDERR_FILENO);
 }
 
@@ -2626,8 +2626,8 @@ static struct verbs_context *mlx5_alloc_context(struct ibv_device *ibdev,
 	struct ibv_fd_arr               *fds = NULL;
 	int ret;
 
-    printf_ffl("MLX5 Alloc context\n");
-	dump_stack();
+	printf_ffl("MLX5 Alloc context\n");
+	// dump_stack();
 	context = mlx5_init_context(ibdev, cmd_fd);
 	if (!context)
 		return NULL;
