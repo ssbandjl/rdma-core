@@ -63,10 +63,17 @@
 #define MLX5_IO_DEBUG 0
 #endif
 
+#include <unistd.h>
+#include <sys/syscall.h>
 #ifndef printf_ffl
-#define printf_ffl(format, arg...)						\
-	if (MLX5_IO_DEBUG)										\
-		printf("%s(), %s:%d, " format, __func__, __FILE__, __LINE__, ##arg)
+#define printf_ffl(format, arg...) do {							\
+	if (MLX5_IO_DEBUG) {								\
+		char hostname[128] = {0};  							\
+		gethostname(hostname, sizeof(hostname)); 						\
+		printf("[%s] tid:%ld, %s(), %s:%d, " format,					\
+			hostname, (long)syscall(SYS_gettid), __FUNCTION__, __FILE__, __LINE__, ##arg);	\
+	}										\
+} while(0)
 #endif
 
 typedef _Atomic(uint32_t) atomic_uint32_t;

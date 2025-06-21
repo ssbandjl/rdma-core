@@ -2606,6 +2606,7 @@ err_free:
 	return -1;
 }
 
+#if 0
 static void dump_stack(void) {
     void *buffer[100];
     int nptrs = backtrace(buffer, 100);
@@ -2613,6 +2614,7 @@ static void dump_stack(void) {
     fprintf(stderr, "Verbs Stack trace (depth: %d):\n", nptrs);
     backtrace_symbols_fd(buffer, nptrs, STDERR_FILENO);
 }
+#endif
 
 static struct verbs_context *mlx5_alloc_context(struct ibv_device *ibdev,
 						int cmd_fd,
