@@ -3085,8 +3085,10 @@ int mlx5_modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr,
 		return EOPNOTSUPP;
 
 	if (mqp->flags & MLX5_QP_FLAGS_USE_UNDERLAY) {
-		if (attr_mask & ~(IBV_QP_STATE | IBV_QP_CUR_STATE))
+		if (attr_mask & ~(IBV_QP_STATE | IBV_QP_CUR_STATE)) {
+			printf_ffl("Modify QP, EINVAL\n");
 			return EINVAL;
+		}
 
 		/* Underlay QP is UD over infiniband */
 		if (context->cached_device_cap_flags & IBV_DEVICE_UD_IP_CSUM)
@@ -3126,9 +3128,11 @@ int mlx5_modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr,
 		ret = ibv_cmd_modify_qp_ex(qp, attr, attr_mask, &cmd_ex.ibv_cmd,
 					   sizeof(cmd_ex), &resp.ibv_resp,
 					   sizeof(resp));
+		printf_ffl("Modify QP, ret:%d\n", ret);
 	} else {
 		ret = ibv_cmd_modify_qp(qp, attr, attr_mask,
 					&cmd, sizeof(cmd));
+		printf_ffl("Modify QP, ret:%d\n", ret);
 	}
 
 	if (!ret && mqp->set_ece) {
@@ -3176,15 +3180,19 @@ int mlx5_modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr,
 	    attr->qp_state == IBV_QPS_INIT &&
 	    (mqp->flags & MLX5_QP_FLAGS_DRAIN_SIGERR)) {
 		ret = mlx5_modify_qp_drain_sigerr(qp);
+		printf_ffl("Modify QP, ret:%d\n", ret);
 	}
 
 	if (!ret && (attr_mask & IBV_QP_STATE) &&
-	    (attr->qp_state == IBV_QPS_INIT) && mqp->need_mmo_enable)
-		ret = qp_enable_mmo(qp);
+	    (attr->qp_state == IBV_QPS_INIT) && mqp->need_mmo_enable) {
+			ret = qp_enable_mmo(qp);
+			printf_ffl("Modify QP, ret:%d\n", ret);
+		}
 
 	if (!ret && (attr_mask & IBV_QP_STATE))
 		set_qp_operational_state(mqp, attr->qp_state);
 
+	printf_ffl("Modify QP, ret:%d\n", ret);
 	return ret;
 }
 

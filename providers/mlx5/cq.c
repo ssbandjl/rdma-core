@@ -1739,6 +1739,7 @@ int mlx5_arm_cq(struct ibv_cq *ibvcq, int solicited)
 	uint32_t ci;
 	uint32_t cmd;
 
+	printf_ffl("Notify CQ, cq:%d\n", cq->cqn);
 	sn  = cq->arm_sn & 3;
 	ci  = cq->cons_index & 0xffffff;
 	cmd = solicited ? MLX5_CQ_DB_REQ_NOT_SOL : MLX5_CQ_DB_REQ_NOT;
@@ -1765,6 +1766,7 @@ int mlx5_arm_cq(struct ibv_cq *ibvcq, int solicited)
 void mlx5_cq_event(struct ibv_cq *cq)
 {
 	to_mcq(cq)->arm_sn++;
+	printf_ffl("Ack CQ Event\n");
 }
 
 static int is_equal_rsn(struct mlx5_cqe64 *cqe64, uint32_t rsn)
